@@ -299,5 +299,4 @@ public class ConnectSchemaTest {
         assertEquals(s1, s2);
         assertNotEquals(s1, differentField);
     }
-
 }

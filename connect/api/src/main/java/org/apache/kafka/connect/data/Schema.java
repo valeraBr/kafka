@@ -17,6 +17,7 @@
 
 package org.apache.kafka.connect.data;
 
+import java.util.LinkedList;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -161,4 +162,20 @@ public interface Schema {
      * @return the {@link Schema}
      */
     Schema schema();
+
+    /**
+     * Resolve this and any child schemas that may be symbolic or have cyclic references
+     * @param parents a list of schemas that are parents of this schema
+     * @return the resolved schema
+     */
+    Schema resolve(List<Schema> parents);
+
+    /**
+     * Get a comparison context for this schema. This is a thread safe way to manage the context of a nested
+     * comparison that may have cyclic references. The comparison logic reviews the context to detect loops and
+     * break cyclic hashing or equals.
+     * @param context
+     * @return A new ComparisonContext
+     */
+    Object compareContext(LinkedList<Object> context);
 }
