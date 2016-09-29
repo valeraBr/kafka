@@ -165,6 +165,11 @@ public class ConsumerConfig extends AbstractConfig {
     public static final String RETRY_BACKOFF_MS_CONFIG = CommonClientConfigs.RETRY_BACKOFF_MS_CONFIG;
 
     /**
+     * <code>metric.id</code>
+     */
+    public static final String METRIC_ID_CONFIG = CommonClientConfigs.METRIC_ID_CONFIG;
+
+    /**
      * <code>metrics.sample.window.ms</code>
      */
     public static final String METRICS_SAMPLE_WINDOW_MS_CONFIG = CommonClientConfigs.METRICS_SAMPLE_WINDOW_MS_CONFIG;
@@ -315,6 +320,11 @@ public class ConsumerConfig extends AbstractConfig {
                                         true,
                                         Importance.LOW,
                                         CHECK_CRCS_DOC)
+                                .define(METRIC_ID_CONFIG,
+                                        Type.STRING,
+                                        "",
+                                        Importance.LOW,
+                                        CommonClientConfigs.METRIC_ID_DOC)
                                 .define(METRICS_SAMPLE_WINDOW_MS_CONFIG,
                                         Type.LONG,
                                         30000,
