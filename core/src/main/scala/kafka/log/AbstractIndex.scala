@@ -20,6 +20,7 @@ package kafka.log
 import java.io.{File, RandomAccessFile}
 import java.nio.{ByteBuffer, MappedByteBuffer}
 import java.nio.channels.FileChannel
+import java.nio.file.StandardOpenOption
 import java.util.concurrent.locks.{Lock, ReentrantLock}
 
 import kafka.log.IndexSearchType.IndexSearchEntity
@@ -45,9 +46,13 @@ abstract class AbstractIndex[K, V](@volatile private[this] var _file: File, val 
   protected val lock = new ReentrantLock
 
   @volatile
+  private[this] var fileChannel: FileChannel = null
+
+  @volatile
   protected var mmap: MappedByteBuffer = {
     val newlyCreated = _file.createNewFile()
     val raf = new RandomAccessFile(_file, "rw")
+    var idx: MappedByteBuffer = null
     try {
       /* pre-allocate the file if necessary */
       if(newlyCreated) {
@@ -58,7 +63,8 @@ abstract class AbstractIndex[K, V](@volatile private[this] var _file: File, val 
 
       /* memory-map the file */
       val len = raf.length()
-      val idx = raf.getChannel.map(FileChannel.MapMode.READ_WRITE, 0, len)
+      fileChannel = FileChannel.open(_file.toPath, StandardOpenOption.WRITE, StandardOpenOption.READ)
+      idx = fileChannel.map(FileChannel.MapMode.READ_WRITE, 0, len)
 
       /* set the position in the index for the next entry */
       if(newlyCreated)
@@ -69,6 +75,10 @@ abstract class AbstractIndex[K, V](@volatile private[this] var _file: File, val 
       idx
     } finally {
       CoreUtils.swallow(raf.close())
+      if(mmap == null && fileChannel != null) {
+        fileChannel.close()
+        fileChannel = null
+      }
     }
   }
 
@@ -110,14 +120,19 @@ abstract class AbstractIndex[K, V](@volatile private[this] var _file: File, val 
 
       /* Windows won't let us modify the file length while the file is mmapped :-( */
       if(Os.isWindows)
-        forceUnmap(mmap)
+        forceUnmap()
       try {
         raf.setLength(roundedNewSize)
-        mmap = raf.getChannel().map(FileChannel.MapMode.READ_WRITE, 0, roundedNewSize)
+        fileChannel = FileChannel.open(_file.toPath, StandardOpenOption.WRITE, StandardOpenOption.READ)
+        mmap = fileChannel.map(FileChannel.MapMode.READ_WRITE, 0, roundedNewSize)
         _maxEntries = mmap.limit / entrySize
         mmap.position(position)
       } finally {
         CoreUtils.swallow(raf.close())
+        if(mmap == null && fileChannel != null) {
+          fileChannel.close()
+          fileChannel = null
+        }
       }
     }
   }
@@ -147,7 +162,7 @@ abstract class AbstractIndex[K, V](@volatile private[this] var _file: File, val 
   def delete(): Boolean = {
     info(s"Deleting index ${_file.getAbsolutePath}")
     if(Os.isWindows)
-      CoreUtils.swallow(forceUnmap(mmap))
+      CoreUtils.swallow(forceUnmap())
     _file.delete()
   }
 
@@ -192,14 +207,20 @@ abstract class AbstractIndex[K, V](@volatile private[this] var _file: File, val 
   /**
    * Forcefully free the buffer's mmap. We do this only on windows.
    */
-  protected def forceUnmap(m: MappedByteBuffer) {
+  protected def forceUnmap() {
     try {
-      m match {
+      mmap match {
         case buffer: DirectBuffer =>
           val bufferCleaner = buffer.cleaner()
           /* cleaner can be null if the mapped region has size 0 */
           if (bufferCleaner != null)
             bufferCleaner.clean()
+          /* close the fileChannel for the index file to release the file handle*/
+          if(fileChannel != null) {
+            fileChannel.close()
+            fileChannel = null
+          }
+          mmap = null
         case _ =>
       }
     } catch {
