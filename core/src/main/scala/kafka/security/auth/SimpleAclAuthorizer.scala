@@ -18,19 +18,20 @@ package kafka.security.auth
 
 import java.util
 import java.util.concurrent.locks.ReentrantReadWriteLock
-import kafka.common.{NotificationHandler, ZkNodeChangeNotificationListener}
 
+import kafka.common.{NotificationHandler, ZkNodeChangeNotificationListener}
 import kafka.network.RequestChannel.Session
 import kafka.security.auth.SimpleAclAuthorizer.VersionedAcls
 import kafka.server.KafkaConfig
 import kafka.utils.CoreUtils.{inReadLock, inWriteLock}
 import kafka.utils._
-import org.I0Itec.zkclient.exception.{ZkNodeExistsException, ZkNoNodeException}
+import net.ripe.commons.ip.{Ipv4, Ipv4Range, Ipv6, Ipv6Range}
+import org.I0Itec.zkclient.exception.{ZkNoNodeException, ZkNodeExistsException}
 import org.apache.kafka.common.security.JaasUtils
 import org.apache.kafka.common.security.auth.KafkaPrincipal
-import scala.collection.JavaConverters._
 import org.apache.log4j.Logger
 
+import scala.collection.JavaConverters._
 import scala.util.Random
 
 object SimpleAclAuthorizer {
@@ -165,11 +166,27 @@ class SimpleAclAuthorizer extends Authorizer with Logging {
       acl.permissionType == permissionType &&
         (acl.principal == principal || acl.principal == Acl.WildCardPrincipal) &&
         (operations == acl.operation || acl.operation == All) &&
-        (acl.host == host || acl.host == Acl.WildCardHost)
+        aclHostMatch(acl, host)
     }.exists { acl =>
       authorizerLogger.debug(s"operation = $operations on resource = $resource from host = $host is $permissionType based on acl = $acl")
       true
     }
+  }
+
+  private def aclHostMatch(acl: Acl, host: String): Boolean = {
+    if (acl.host == host || acl.host == Acl.WildCardHost) return true
+    if (acl.host.contains("/")) {
+      return try {
+        if (acl.host.contains(":")) {
+          Ipv6Range.parseCidr(acl.host).contains(Ipv6.of(host))
+        } else {
+          Ipv4Range.parseCidr(acl.host).contains(Ipv4.of(host))
+        }
+      } catch {
+        case _: Throwable => false
+      }
+    }
+    false
   }
 
   override def addAcls(acls: Set[Acl], resource: Resource) {
