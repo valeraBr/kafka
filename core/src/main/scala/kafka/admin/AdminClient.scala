@@ -19,11 +19,13 @@ import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.{ConcurrentLinkedQueue, Future, TimeUnit}
 
 import kafka.admin.AdminClient.DeleteRecordsResult
-import kafka.common.KafkaException
+import kafka.common.{KafkaException => OldKafkaException}
 import kafka.coordinator.group.GroupOverview
 import kafka.utils.Logging
+
 import org.apache.kafka.clients._
 import org.apache.kafka.clients.consumer.internals.{ConsumerNetworkClient, ConsumerProtocol, RequestFuture, RequestFutureAdapter}
+import org.apache.kafka.common.{KafkaException => NewKafkaException}
 import org.apache.kafka.common.config.ConfigDef.{Importance, Type}
 import org.apache.kafka.common.config.{AbstractConfig, ConfigDef}
 import org.apache.kafka.common.errors.TimeoutException
@@ -87,8 +89,10 @@ class AdminClient(val time: Time,
     pendingFutures.remove(future)
     if (future.succeeded())
       future.value().responseBody()
-    else
+    else {
+      future.exception().addSuppressed(new NewKafkaException("An error occurred in the broker."))
       throw future.exception()
+    }
   }
 
   private def sendAnyNode(api: ApiKeys, request: AbstractRequest.Builder[_ <: AbstractRequest]): AbstractResponse = {
@@ -297,7 +301,7 @@ class AdminClient(val time: Time,
     val response = responseBody.asInstanceOf[DescribeGroupsResponse]
     val metadata = response.groups.get(groupId)
     if (metadata == null)
-      throw new KafkaException(s"Response from broker contained no metadata for group $groupId")
+      throw new OldKafkaException(s"Response from broker contained no metadata for group $groupId")
     metadata
   }
 

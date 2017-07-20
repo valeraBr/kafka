@@ -155,10 +155,16 @@ public class ConsumerCoordinatorTest {
         assertTrue(future.succeeded());
     }
 
-    @Test(expected = GroupAuthorizationException.class)
+    @Test
     public void testGroupDescribeUnauthorized() {
-        client.prepareResponse(groupCoordinatorResponse(node, Errors.GROUP_AUTHORIZATION_FAILED));
-        coordinator.ensureCoordinatorReady();
+        try {
+            client.prepareResponse(groupCoordinatorResponse(node, Errors.GROUP_AUTHORIZATION_FAILED));
+            coordinator.ensureCoordinatorReady();
+        } catch (GroupAuthorizationException e) {
+            Throwable[] suppressed = e.getSuppressed();
+            assertTrue(suppressed != null && suppressed.length == 1);
+            assertEquals(KafkaException.class, e.getSuppressed()[0].getClass());
+        }
     }
 
     @Test(expected = GroupAuthorizationException.class)

@@ -36,6 +36,7 @@ import java.util.concurrent.atomic.AtomicReference;
  *         ClientResponse response = future.value();
  *         // Handle response
  *     } else {
+ *         future.exception().addSuppressed(new KafkaException(...))
  *         throw future.exception();
  *     }
  * </pre>

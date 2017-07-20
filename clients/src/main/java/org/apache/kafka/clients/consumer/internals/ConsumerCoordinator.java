@@ -479,8 +479,10 @@ public final class ConsumerCoordinator extends AbstractCoordinator {
             if (future.succeeded())
                 return future.value();
 
-            if (!future.isRetriable())
+            if (!future.isRetriable()) {
+                future.exception().addSuppressed(new KafkaException("An error occurred in the broker when fetching offsets."));
                 throw future.exception();
+            }
 
             time.sleep(retryBackoffMs);
         }
@@ -610,8 +612,10 @@ public final class ConsumerCoordinator extends AbstractCoordinator {
                 return true;
             }
 
-            if (!future.isRetriable())
+            if (!future.isRetriable()) {
+                future.exception().addSuppressed(new KafkaException("An error occurred in the broker when committing offsets."));
                 throw future.exception();
+            }
 
             time.sleep(retryBackoffMs);
 

@@ -313,8 +313,10 @@ public class Fetcher<K, V> implements SubscriptionState.Listener, Closeable {
             RequestFuture<ClientResponse> future = sendMetadataRequest(request);
             client.poll(future, remaining);
 
-            if (future.failed() && !future.isRetriable())
+            if (future.failed() && !future.isRetriable()) {
+                future.exception().addSuppressed(new KafkaException("An error occurred in the broker when fetching metadata."));
                 throw future.exception();
+            }
 
             if (future.succeeded()) {
                 MetadataResponse response = (MetadataResponse) future.value().responseBody();
@@ -458,8 +460,10 @@ public class Fetcher<K, V> implements SubscriptionState.Listener, Closeable {
             if (future.succeeded())
                 return future.value();
 
-            if (!future.isRetriable())
+            if (!future.isRetriable()) {
+                future.exception().addSuppressed(new KafkaException("An error occurred in the broker when fetching offsets."));
                 throw future.exception();
+            }
 
             long elapsed = time.milliseconds() - startMs;
             remaining = timeout - elapsed;

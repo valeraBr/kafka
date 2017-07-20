@@ -18,36 +18,35 @@ import java.util.concurrent.ExecutionException
 import java.util.regex.Pattern
 import java.util.{ArrayList, Collections, Properties}
 
+import kafka.admin.AdminUtils
 import kafka.common.TopicAndPartition
+import kafka.log.LogConfig
+import kafka.network.SocketServer
 import kafka.security.auth._
 import kafka.server.{BaseRequestTest, KafkaConfig}
 import kafka.utils.TestUtils
-import kafka.admin.AdminUtils
-import kafka.log.LogConfig
-import kafka.network.SocketServer
-import org.apache.kafka.clients.consumer.OffsetAndMetadata
-import org.apache.kafka.clients.consumer.internals.NoOpConsumerRebalanceListener
-import org.apache.kafka.clients.consumer._
-import org.apache.kafka.clients.producer._
-import org.apache.kafka.common.errors._
-import org.apache.kafka.common.internals.Topic.GROUP_METADATA_TOPIC_NAME
-import org.apache.kafka.common.KafkaException
-import org.apache.kafka.common.protocol.{ApiKeys, Errors, SecurityProtocol}
-import org.apache.kafka.common.requests.{Resource => RResource, ResourceType => RResourceType, _}
-import org.apache.kafka.common.acl.{AccessControlEntry, AccessControlEntryFilter, AclBinding, AclBindingFilter, AclOperation, AclPermissionType}
-import org.apache.kafka.common.network.ListenerName
-import org.apache.kafka.common.record.{CompressionType, MemoryRecords, RecordBatch, SimpleRecord}
-import org.apache.kafka.common.requests.CreateAclsRequest.AclCreation
-import org.apache.kafka.common.requests.CreateTopicsRequest.TopicDetails
-import org.apache.kafka.common.resource.{ResourceFilter, Resource => AdminResource, ResourceType => AdminResourceType}
-import org.apache.kafka.common.security.auth.KafkaPrincipal
-import org.apache.kafka.common.{Node, TopicPartition, requests}
-import org.junit.Assert._
-import org.junit.{After, Assert, Before, Test}
 
 import scala.collection.JavaConverters._
 import scala.collection.mutable
 import scala.collection.mutable.Buffer
+import org.apache.kafka.clients.consumer._
+import org.apache.kafka.clients.consumer.internals.NoOpConsumerRebalanceListener
+import org.apache.kafka.clients.producer._
+import org.apache.kafka.common.{KafkaException, Node, TopicPartition, requests}
+import org.apache.kafka.common.errors._
+import org.apache.kafka.common.internals.Topic.GROUP_METADATA_TOPIC_NAME
+import org.apache.kafka.common.acl.{AccessControlEntry, AccessControlEntryFilter, AclBinding, AclBindingFilter, AclOperation, AclPermissionType}
+import org.apache.kafka.common.network.ListenerName
+import org.apache.kafka.common.protocol.{ApiKeys, Errors, SecurityProtocol}
+import org.apache.kafka.common.record.{CompressionType, MemoryRecords, RecordBatch, SimpleRecord}
+import org.apache.kafka.common.requests.CreateAclsRequest.AclCreation
+import org.apache.kafka.common.requests.CreateTopicsRequest.TopicDetails
+import org.apache.kafka.common.requests.{Resource => RResource, ResourceType => RResourceType, _}
+import org.apache.kafka.common.resource.{ResourceFilter, Resource => AdminResource, ResourceType => AdminResourceType}
+import org.apache.kafka.common.security.auth.KafkaPrincipal
+
+import org.junit.{After, Assert, Before, Test}
+import org.junit.Assert._
 
 class AuthorizerIntegrationTest extends BaseRequestTest {
 
@@ -485,13 +484,20 @@ class AuthorizerIntegrationTest extends BaseRequestTest {
     sendRecords(numRecords, topicPartition)
   }
 
-  @Test(expected = classOf[GroupAuthorizationException])
+  @Test
   def testConsumeWithNoAccess(): Unit = {
-    addAndVerifyAcls(Set(new Acl(KafkaPrincipal.ANONYMOUS, Allow, Acl.WildCardHost, Write)), topicResource)
-    sendRecords(1, tp)
-    removeAllAcls()
-    this.consumers.head.assign(List(tp).asJava)
-    consumeRecords(this.consumers.head)
+    try {
+      addAndVerifyAcls(Set(new Acl(KafkaPrincipal.ANONYMOUS, Allow, Acl.WildCardHost, Write)), topicResource)
+      sendRecords(1, tp)
+      removeAllAcls()
+      this.consumers.head.assign(List(tp).asJava)
+      consumeRecords(this.consumers.head)
+    } catch {
+      case e: GroupAuthorizationException =>
+        val suppressed = e.getSuppressed
+        assertTrue(suppressed != null && suppressed.length == 1)
+        assertEquals(classOf[KafkaException], suppressed.head.getClass)
+    }
   }
 
   @Test
