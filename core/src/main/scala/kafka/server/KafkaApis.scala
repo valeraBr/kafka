@@ -998,6 +998,7 @@ class KafkaApis(val requestChannel: RequestChannel,
         } else if (allowAutoTopicCreation && config.autoCreateTopicsEnable) {
           createTopic(topic, config.numPartitions, config.defaultReplicationFactor)
         } else {
+          warn(s"The topic '$topic' does not exist and auto topic creation is disabled.")
           new MetadataResponse.TopicMetadata(Errors.UNKNOWN_TOPIC_OR_PARTITION, topic, false, java.util.Collections.emptyList())
         }
       }
