@@ -80,7 +80,7 @@ object AclAuthorizer {
   }
 }
 
-class AclAuthorizer extends Authorizer with Logging {
+class AclAuthorizer extends CachedAuthorizer with Logging {
   private[security] val authorizerLogger = Logger("kafka.authorizer.logger")
   private var superUsers = Set.empty[KafkaPrincipal]
   private var shouldAllowEveryoneIfNoAclIsFound = false
@@ -243,7 +243,7 @@ class AclAuthorizer extends Authorizer with Logging {
     if (zkClient != null) zkClient.close()
   }
 
-  private def authorizeAction(requestContext: AuthorizableRequestContext, action: Action): AuthorizationResult = {
+  def authorizeActionUncached(requestContext: AuthorizableRequestContext, action: Action): AuthorizationResult = {
     val resource = AuthorizerUtils.convertToResource(action.resourcePattern)
     if (resource.patternType != PatternType.LITERAL) {
       throw new IllegalArgumentException("Only literal resources are supported. Got: " + resource.patternType)
@@ -483,6 +483,13 @@ class AclAuthorizer extends Authorizer with Logging {
       aclCache = aclCache + (resource -> versionedAcls)
     } else {
       aclCache = aclCache - resource
+    }
+    if(resource.patternType==PatternType.LITERAL && !Acl.WildCardResource.equals(resource.name)) {
+        this.removeResourceAuthorizerCache(resource)
+        authorizerLogger.debug(s"remove resource AuthorizerCache for resource $resource")
+    }else{
+      this.resetAuthorizerCache()
+      authorizerLogger.debug(s"reset resource AuthorizerCache for all resources")
     }
   }
 
