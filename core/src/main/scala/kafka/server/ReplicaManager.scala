@@ -1277,6 +1277,10 @@ class ReplicaManager(val config: KafkaConfig,
         // have been completely populated before starting the checkpointing there by avoiding weird race conditions
         startHighWatermarkCheckPointThread()
 
+        // delete stray logs
+        if (leaderAndIsrRequest.containsAllReplicas)
+          logManager.deleteStrayLogs(nonOfflinePartitionsIterator.map(_.topicPartition).toSet)
+
         val futureReplicasAndInitialOffset = new mutable.HashMap[TopicPartition, InitialFetchState]
         for (partition <- newPartitions) {
           val topicPartition = partition.topicPartition

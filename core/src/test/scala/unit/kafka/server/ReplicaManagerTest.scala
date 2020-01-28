@@ -178,7 +178,8 @@ class ReplicaManagerTest {
           .setZkVersion(0)
           .setReplicas(brokerList)
           .setIsNew(false)).asJava,
-        Set(new Node(0, "host1", 0), new Node(1, "host2", 1)).asJava).build()
+        Set(new Node(0, "host1", 0), new Node(1, "host2", 1)).asJava,
+        false).build()
       rm.becomeLeaderOrFollower(0, leaderAndIsrRequest1, (_, _) => ())
       rm.getPartitionOrException(new TopicPartition(topic, 0), expectLeader = true)
           .localLogOrException
@@ -200,7 +201,8 @@ class ReplicaManagerTest {
           .setZkVersion(0)
           .setReplicas(brokerList)
           .setIsNew(false)).asJava,
-        Set(new Node(0, "host1", 0), new Node(1, "host2", 1)).asJava).build()
+        Set(new Node(0, "host1", 0), new Node(1, "host2", 1)).asJava,
+        false).build()
       rm.becomeLeaderOrFollower(1, leaderAndIsrRequest2, (_, _) => ())
 
       assertTrue(appendResult.isFired)
@@ -233,7 +235,8 @@ class ReplicaManagerTest {
           .setZkVersion(0)
           .setReplicas(brokerList)
           .setIsNew(true)).asJava,
-        Set(new Node(0, "host1", 0), new Node(1, "host2", 1)).asJava).build()
+        Set(new Node(0, "host1", 0), new Node(1, "host2", 1)).asJava,
+        false).build()
       replicaManager.becomeLeaderOrFollower(0, leaderAndIsrRequest1, (_, _) => ())
       replicaManager.getPartitionOrException(new TopicPartition(topic, 0), expectLeader = true)
         .localLogOrException
@@ -293,7 +296,8 @@ class ReplicaManagerTest {
           .setZkVersion(0)
           .setReplicas(brokerList)
           .setIsNew(true)).asJava,
-        Set(new Node(0, "host1", 0), new Node(1, "host2", 1)).asJava).build()
+        Set(new Node(0, "host1", 0), new Node(1, "host2", 1)).asJava,
+        false).build()
       replicaManager.becomeLeaderOrFollower(0, leaderAndIsrRequest1, (_, _) => ())
       replicaManager.getPartitionOrException(new TopicPartition(topic, 0), expectLeader = true)
         .localLogOrException
@@ -399,7 +403,8 @@ class ReplicaManagerTest {
           .setZkVersion(0)
           .setReplicas(brokerList)
           .setIsNew(true)).asJava,
-        Set(new Node(0, "host1", 0), new Node(1, "host2", 1)).asJava).build()
+        Set(new Node(0, "host1", 0), new Node(1, "host2", 1)).asJava,
+        false).build()
       replicaManager.becomeLeaderOrFollower(0, leaderAndIsrRequest1, (_, _) => ())
       replicaManager.getPartitionOrException(new TopicPartition(topic, 0), expectLeader = true)
         .localLogOrException
@@ -475,7 +480,8 @@ class ReplicaManagerTest {
           .setZkVersion(0)
           .setReplicas(brokerList)
           .setIsNew(false)).asJava,
-        Set(new Node(0, "host1", 0), new Node(1, "host2", 1), new Node(2, "host2", 2)).asJava).build()
+        Set(new Node(0, "host1", 0), new Node(1, "host2", 1), new Node(2, "host2", 2)).asJava,
+        false).build()
       rm.becomeLeaderOrFollower(0, leaderAndIsrRequest1, (_, _) => ())
       rm.getPartitionOrException(new TopicPartition(topic, 0), expectLeader = true)
         .localLogOrException
@@ -529,7 +535,7 @@ class ReplicaManagerTest {
         .setIsNew(true)
       val leaderAndIsrRequest = new LeaderAndIsrRequest.Builder(ApiKeys.LEADER_AND_ISR.latestVersion, 0, 0, brokerEpoch,
         Seq(leaderAndIsrPartitionState).asJava,
-        Set(new Node(0, "host1", 0), new Node(1, "host2", 1)).asJava).build()
+        Set(new Node(0, "host1", 0), new Node(1, "host2", 1)).asJava, false).build()
       val leaderAndIsrResponse = replicaManager.becomeLeaderOrFollower(0, leaderAndIsrRequest, (_, _) => ())
       assertEquals(Errors.NONE, leaderAndIsrResponse.error)
 
@@ -643,7 +649,8 @@ class ReplicaManagerTest {
             .setReplicas(partition1Replicas)
             .setIsNew(true)
         ).asJava,
-        Set(new Node(0, "host1", 0), new Node(1, "host2", 1)).asJava).build()
+        Set(new Node(0, "host1", 0), new Node(1, "host2", 1)).asJava,
+        false).build()
       replicaManager.becomeLeaderOrFollower(0, leaderAndIsrRequest, (_, _) => ())
 
       // Append a couple of messages.
@@ -742,7 +749,8 @@ class ReplicaManagerTest {
       controllerId, controllerEpoch, brokerEpoch,
       Seq(leaderAndIsrPartitionState(tp, leaderEpoch, leaderBrokerId, aliveBrokerIds)).asJava,
       Set(new Node(followerBrokerId, "host1", 0),
-        new Node(leaderBrokerId, "host2", 1)).asJava).build()
+        new Node(leaderBrokerId, "host2", 1)).asJava,
+      false).build()
     replicaManager.becomeLeaderOrFollower(correlationId, leaderAndIsrRequest0,
       (_, followers) => assertEquals(followerBrokerId, followers.head.partitionId))
     assertTrue(countDownLatch.await(1000L, TimeUnit.MILLISECONDS))
@@ -822,7 +830,8 @@ class ReplicaManagerTest {
         .setZkVersion(0)
         .setReplicas(brokerList)
         .setIsNew(false)).asJava,
-      Set(new Node(0, "host1", 0), new Node(1, "host2", 1)).asJava).build()
+      Set(new Node(0, "host1", 0), new Node(1, "host2", 1)).asJava,
+      false).build()
     replicaManager.becomeLeaderOrFollower(1, leaderAndIsrRequest2, (_, _) => ())
 
     val metadata: ClientMetadata = new DefaultClientMetadata("rack-a", "client-id",
@@ -871,7 +880,8 @@ class ReplicaManagerTest {
         .setZkVersion(0)
         .setReplicas(brokerList)
         .setIsNew(false)).asJava,
-      Set(new Node(0, "host1", 0), new Node(1, "host2", 1)).asJava).build()
+      Set(new Node(0, "host1", 0), new Node(1, "host2", 1)).asJava,
+      false).build()
     replicaManager.becomeLeaderOrFollower(1, leaderAndIsrRequest2, (_, _) => ())
 
     val metadata: ClientMetadata = new DefaultClientMetadata("rack-a", "client-id",
@@ -938,7 +948,8 @@ class ReplicaManagerTest {
         .setZkVersion(0)
         .setReplicas(partition0Replicas)
         .setIsNew(true)).asJava,
-      Set(new Node(0, "host1", 0), new Node(1, "host2", 1)).asJava).build()
+      Set(new Node(0, "host1", 0), new Node(1, "host2", 1)).asJava,
+      false).build()
     replicaManager.becomeLeaderOrFollower(0, becomeFollowerRequest, (_, _) => ())
 
     // Fetch from follower, with non-empty ClientMetadata (FetchRequest v11+)
@@ -978,7 +989,8 @@ class ReplicaManagerTest {
         .setZkVersion(0)
         .setReplicas(partition0Replicas)
         .setIsNew(true)).asJava,
-      Set(new Node(0, "host1", 0), new Node(1, "host2", 1)).asJava).build()
+      Set(new Node(0, "host1", 0), new Node(1, "host2", 1)).asJava,
+      false).build()
     replicaManager.becomeLeaderOrFollower(1, becomeLeaderRequest, (_, _) => ())
 
     val partitionData = new FetchRequest.PartitionData(0L, 0L, 100,
@@ -998,7 +1010,8 @@ class ReplicaManagerTest {
         .setZkVersion(0)
         .setReplicas(partition0Replicas)
         .setIsNew(true)).asJava,
-      Set(new Node(0, "host1", 0), new Node(1, "host2", 1)).asJava).build()
+      Set(new Node(0, "host1", 0), new Node(1, "host2", 1)).asJava,
+      false).build()
     replicaManager.becomeLeaderOrFollower(0, becomeFollowerRequest, (_, _) => ())
 
     assertNotNull(fetchResult.get)
@@ -1026,7 +1039,8 @@ class ReplicaManagerTest {
         .setZkVersion(0)
         .setReplicas(partition0Replicas)
         .setIsNew(true)).asJava,
-      Set(new Node(0, "host1", 0), new Node(1, "host2", 1)).asJava).build()
+      Set(new Node(0, "host1", 0), new Node(1, "host2", 1)).asJava,
+      false).build()
     replicaManager.becomeLeaderOrFollower(1, becomeLeaderRequest, (_, _) => ())
 
     val clientMetadata = new DefaultClientMetadata("", "", null, KafkaPrincipal.ANONYMOUS, "")
@@ -1047,7 +1061,8 @@ class ReplicaManagerTest {
         .setZkVersion(0)
         .setReplicas(partition0Replicas)
         .setIsNew(true)).asJava,
-      Set(new Node(0, "host1", 0), new Node(1, "host2", 1)).asJava).build()
+      Set(new Node(0, "host1", 0), new Node(1, "host2", 1)).asJava,
+      false).build()
     replicaManager.becomeLeaderOrFollower(0, becomeFollowerRequest, (_, _) => ())
 
     assertNotNull(fetchResult.get)
@@ -1074,7 +1089,8 @@ class ReplicaManagerTest {
         .setZkVersion(0)
         .setReplicas(partition0Replicas)
         .setIsNew(true)).asJava,
-      Set(new Node(0, "host1", 0), new Node(1, "host2", 1)).asJava).build()
+      Set(new Node(0, "host1", 0), new Node(1, "host2", 1)).asJava,
+      false).build()
     replicaManager.becomeLeaderOrFollower(1, becomeLeaderRequest, (_, _) => ())
 
     val clientMetadata = new DefaultClientMetadata("", "", null, KafkaPrincipal.ANONYMOUS, "")
@@ -1116,7 +1132,8 @@ class ReplicaManagerTest {
         .setZkVersion(0)
         .setReplicas(partition0Replicas)
         .setIsNew(true)).asJava,
-      Set(new Node(0, "host1", 0), new Node(1, "host2", 1)).asJava).build()
+      Set(new Node(0, "host1", 0), new Node(1, "host2", 1)).asJava,
+      false).build()
     replicaManager.becomeLeaderOrFollower(1, becomeLeaderRequest, (_, _) => ())
 
     val partitionData = new FetchRequest.PartitionData(0L, 0L, 100,
@@ -1155,7 +1172,8 @@ class ReplicaManagerTest {
         .setZkVersion(0)
         .setReplicas(partition0Replicas)
         .setIsNew(true)).asJava,
-      Set(new Node(0, "host1", 0), new Node(1, "host2", 1)).asJava).build()
+      Set(new Node(0, "host1", 0), new Node(1, "host2", 1)).asJava,
+      false).build()
     replicaManager.becomeLeaderOrFollower(1, becomeLeaderRequest, (_, _) => ())
 
     val produceResult = sendProducerAppend(replicaManager, tp0)
@@ -1543,7 +1561,8 @@ class ReplicaManagerTest {
             .setReplicas(partition1Replicas)
             .setIsNew(true)
         ).asJava,
-        Set(new Node(0, "host0", 0), new Node(1, "host1", 1)).asJava).build()
+        Set(new Node(0, "host0", 0), new Node(1, "host1", 1)).asJava,
+        false).build()
 
       rm0.becomeLeaderOrFollower(correlationId, leaderAndIsrRequest1, (_, _) => ())
       rm1.becomeLeaderOrFollower(correlationId, leaderAndIsrRequest1, (_, _) => ())
@@ -1573,7 +1592,8 @@ class ReplicaManagerTest {
             .setReplicas(partition1Replicas)
             .setIsNew(true)
         ).asJava,
-        Set(new Node(0, "host0", 0), new Node(1, "host1", 1)).asJava).build()
+        Set(new Node(0, "host0", 0), new Node(1, "host1", 1)).asJava,
+        false).build()
 
       rm0.becomeLeaderOrFollower(correlationId, leaderAndIsrRequest2, (_, _) => ())
       rm1.becomeLeaderOrFollower(correlationId, leaderAndIsrRequest2, (_, _) => ())
@@ -1632,7 +1652,8 @@ class ReplicaManagerTest {
             .setReplicas(partition1Replicas)
             .setIsNew(true)
         ).asJava,
-        Set(new Node(0, "host0", 0), new Node(1, "host1", 1)).asJava).build()
+        Set(new Node(0, "host0", 0), new Node(1, "host1", 1)).asJava,
+        false).build()
 
       rm0.becomeLeaderOrFollower(correlationId, leaderAndIsrRequest1, (_, _) => ())
       rm1.becomeLeaderOrFollower(correlationId, leaderAndIsrRequest1, (_, _) => ())
@@ -1662,7 +1683,8 @@ class ReplicaManagerTest {
             .setReplicas(partition1Replicas)
             .setIsNew(true)
         ).asJava,
-        Set(new Node(0, "host0", 0), new Node(1, "host1", 1)).asJava).build()
+        Set(new Node(0, "host0", 0), new Node(1, "host1", 1)).asJava,
+        false).build()
 
       rm0.becomeLeaderOrFollower(correlationId, leaderAndIsrRequest2, (_, _) => ())
       rm1.becomeLeaderOrFollower(correlationId, leaderAndIsrRequest2, (_, _) => ())
