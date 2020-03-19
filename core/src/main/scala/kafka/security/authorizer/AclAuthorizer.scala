@@ -167,7 +167,19 @@ class AclAuthorizer extends Authorizer with Logging {
     // Start change listeners first and then populate the cache so that there is no timing window
     // between loading cache and processing change notifications.
     startZkChangeListeners()
-    loadCache()
+
+    // resourcesLoadMap : When we want to specify the resource to load, we can put the resource information.
+    // so we can specify TOPIC/GROUP/CLUSTER, we just load what we care, not all.
+    var resourcesLoadMap = Map.empty[ResourceType,String]
+    ResourceType.values.foreach(rt=>{
+      configs.get(rt.name) match {
+        case Some(resourceName) =>{
+          resourcesLoadMap += (rt -> resourceName.toString)
+        }
+        case None => resourcesLoadMap
+      }
+    })
+    loadCache(resourcesLoadMap)
   }
 
   override def start(serverInfo: AuthorizerServerInfo): util.Map[Endpoint, _ <: CompletionStage[Void]] = {
@@ -384,7 +396,7 @@ class AclAuthorizer extends Authorizer with Logging {
     }
   }
 
-  private def loadCache(): Unit = {
+  private def loadCache(resourcesLoadMap: Map[ResourceType,String]): Unit = {
     inWriteLock(lock) {
       ZkAclStore.stores.foreach(store => {
         val resourceTypes = zkClient.getResourceTypes(store.patternType)
@@ -392,11 +404,18 @@ class AclAuthorizer extends Authorizer with Logging {
           val resourceType = Try(SecurityUtils.resourceType(rType))
           resourceType match {
             case Success(resourceTypeObj) =>
-              val resourceNames = zkClient.getResourceNames(store.patternType, resourceTypeObj)
-              for (resourceName <- resourceNames) {
-                val resource = new ResourcePattern(resourceTypeObj, resourceName, store.patternType)
+              val resourceLoad = resourcesLoadMap.getOrElse(resourceTypeObj,ResourcePattern.WILDCARD_RESOURCE)
+              if (!ResourcePattern.WILDCARD_RESOURCE.eq(resourceLoad)) {
+                val resource = new ResourcePattern(resourceTypeObj, resourceLoad, store.patternType)
                 val versionedAcls = getAclsFromZk(resource)
                 updateCache(resource, versionedAcls)
+              }else {
+                val resourceNames = zkClient.getResourceNames(store.patternType, resourceTypeObj)
+                for (resourceName <- resourceNames) {
+                  val resource = new ResourcePattern(resourceTypeObj, resourceName, store.patternType)
+                  val versionedAcls = getAclsFromZk(resource)
+                  updateCache(resource, versionedAcls)
+                }
               }
             case Failure(_) => warn(s"Ignoring unknown ResourceType: $rType")
           }
