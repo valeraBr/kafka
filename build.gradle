@@ -108,6 +108,9 @@ ext {
   generatedDocsDir = new File("${project.rootDir}/docs/generated")
 
   commitId = determineCommitId()
+
+  // See README.md for this build option details and example of usage
+  checkstyleVersion = project.hasProperty('checkstyleVersion') ? checkstyleVersion : versions.checkstyle
 }
 
 allprojects {
@@ -687,7 +690,7 @@ subprojects {
   checkstyle {
     configFile = new File(rootDir, "checkstyle/checkstyle.xml")
     configProperties = checkstyleConfigProperties("import-control.xml")
-    toolVersion = versions.checkstyle
+    toolVersion = checkstyleVersion
   }
 
   configure(checkstyleMain) {
