@@ -34,6 +34,7 @@ import org.apache.kafka.connect.errors.ConnectException;
 import org.apache.kafka.connect.errors.NotFoundException;
 import org.apache.kafka.connect.runtime.isolation.LoaderSwap;
 import org.apache.kafka.connect.runtime.isolation.PluginType;
+import org.apache.kafka.connect.runtime.isolation.PluginDesc;
 import org.apache.kafka.connect.runtime.isolation.Plugins;
 import org.apache.kafka.connect.runtime.rest.entities.ActiveTopicsInfo;
 import org.apache.kafka.connect.runtime.rest.entities.ConfigInfo;
@@ -465,10 +466,22 @@ public abstract class AbstractHerder implements Herder, TaskStatus.Listener, Con
             connectorProps = worker.configTransformer().transform(connectorProps);
         }
         String connType = connectorProps.get(ConnectorConfig.CONNECTOR_CLASS_CONFIG);
-        if (connType == null)
-            throw new BadRequestException("Connector config " + connectorProps + " contains no connector type");
+        if (connType == null) {
+            return createConnectorClassError("Config contains no connector type");
+        }
 
-        Connector connector = getConnector(connType);
+        Connector connector;
+        try {
+            connector = getConnector(connType);
+        } catch (ConnectException e) {
+            return createConnectorClassError(e.getMessage());
+        }
+
+        return validateConnectorConfig(connector, connType, connectorProps, doLog);
+    }
+
+    private ConfigInfos validateConnectorConfig(Connector connector, String connType,
+                                                Map<String, String> connectorProps, boolean doLog) {
         ClassLoader connectorLoader = plugins().connectorLoader(connType);
         try (LoaderSwap loaderSwap = plugins().withClassLoader(connectorLoader)) {
             org.apache.kafka.connect.health.ConnectorType connectorType;
@@ -697,6 +710,19 @@ public abstract class AbstractHerder implements Herder, TaskStatus.Listener, Con
             }
         }
         return new ConfigValueInfo(configValue.name(), value, recommendedValues, configValue.errorMessages(), configValue.visible());
+    }
+
+    private ConfigInfos createConnectorClassError(String errorMessage) {
+        ConfigKey connectorClassConfigKey =
+                ConnectorConfig.configDef().configKeys().get(ConnectorConfig.CONNECTOR_CLASS_CONFIG);
+        ConfigValueInfo valueInfo = new ConfigValueInfo(ConnectorConfig.CONNECTOR_CLASS_CONFIG, null,
+                connectorClassNames(), Collections.singletonList(errorMessage), true);
+        ConfigInfo info = new ConfigInfo(convertConfigKey(connectorClassConfigKey), valueInfo);
+        return new ConfigInfos("", 1, Collections.emptyList(), Collections.singletonList(info));
+    }
+
+    private List<String> connectorClassNames() {
+        return plugins().connectors().stream().map(PluginDesc::className).collect(Collectors.toList());
     }
 
     protected Connector getConnector(String connType) {
