@@ -63,7 +63,10 @@ shopt -s nullglob
 if [ -z "$UPGRADE_KAFKA_STREAMS_TEST_VERSION" ]; then
   for dir in "$base_dir"/core/build/dependant-libs-${SCALA_VERSION}*;
   do
-    CLASSPATH="$CLASSPATH:$dir/*"
+    for file in "$dir"/*;
+    do
+      CLASSPATH="$CLASSPATH":"$file"
+    done
   done
 fi
 
@@ -144,7 +147,10 @@ done
 
 for dir in "$base_dir"/shell/build/dependant-libs-${SCALA_VERSION}*;
 do
-  CLASSPATH="$CLASSPATH:$dir/*"
+  for file in "$dir"/*;
+  do
+    CLASSPATH="$CLASSPATH":"$file"
+  done
 done
 
 for file in "$base_dir"/tools/build/libs/kafka-tools*.jar;
@@ -156,7 +162,10 @@ done
 
 for dir in "$base_dir"/tools/build/dependant-libs-${SCALA_VERSION}*;
 do
-  CLASSPATH="$CLASSPATH:$dir/*"
+  for file in "$dir"/*;
+  do
+    CLASSPATH="$CLASSPATH":"$file"
+  done
 done
 
 for file in "$base_dir"/trogdor/build/libs/trogdor-*.jar;
@@ -180,7 +189,10 @@ do
     fi
   done
   if [ -d "$base_dir/connect/${cc_pkg}/build/dependant-libs" ] ; then
-    CLASSPATH="$CLASSPATH:$base_dir/connect/${cc_pkg}/build/dependant-libs/*"
+    for file in "$base_dir"/connect/${cc_pkg}/build/dependant-libs/*;
+    do
+      CLASSPATH="$CLASSPATH":"$file"
+    done
   fi
 done
 
@@ -222,6 +234,7 @@ fi
 
 # Log4j settings
 if [ -z "$KAFKA_LOG4J_OPTS" ]; then
+  echo "DEPRECATED: using log4j 1.x configuration. To use log4j 2.x configuration, run with: 'export KAFKA_LOG4J_OPTS=\"-Dlog4j.configurationFile=file:$base_dir/config/tools-log4j2.properties\"'"
   # Log to console. This is a tool.
   LOG4J_DIR="$base_dir/config/tools-log4j.properties"
   # If Cygwin is detected, LOG4J_DIR is converted to Windows format.
