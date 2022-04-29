@@ -77,10 +77,10 @@ public final class LocalLogManager implements RaftClient<ApiMessageAndVersion>, 
         int size();
     }
 
-    static class LeaderChangeBatch implements LocalBatch {
+    static class TestLeaderChangeBatch implements LocalBatch {
         private final LeaderAndEpoch newLeader;
 
-        LeaderChangeBatch(LeaderAndEpoch newLeader) {
+        TestLeaderChangeBatch(LeaderAndEpoch newLeader) {
             this.newLeader = newLeader;
         }
 
@@ -96,8 +96,8 @@ public final class LocalLogManager implements RaftClient<ApiMessageAndVersion>, 
 
         @Override
         public boolean equals(Object o) {
-            if (!(o instanceof LeaderChangeBatch)) return false;
-            LeaderChangeBatch other = (LeaderChangeBatch) o;
+            if (!(o instanceof TestLeaderChangeBatch)) return false;
+            TestLeaderChangeBatch other = (TestLeaderChangeBatch) o;
             if (!other.newLeader.equals(newLeader)) return false;
             return true;
         }
@@ -109,7 +109,7 @@ public final class LocalLogManager implements RaftClient<ApiMessageAndVersion>, 
 
         @Override
         public String toString() {
-            return "LeaderChangeBatch(newLeader=" + newLeader + ")";
+            return "TestLeaderChangeBatch(newLeader=" + newLeader + ")";
         }
     }
 
@@ -241,9 +241,9 @@ public final class LocalLogManager implements RaftClient<ApiMessageAndVersion>, 
             prevOffset += batch.size();
             log.debug("append(batch={}, prevOffset={})", batch, prevOffset);
             batches.put(prevOffset, batch);
-            if (batch instanceof LeaderChangeBatch) {
-                LeaderChangeBatch leaderChangeBatch = (LeaderChangeBatch) batch;
-                leader = leaderChangeBatch.newLeader;
+            if (batch instanceof TestLeaderChangeBatch) {
+                TestLeaderChangeBatch testLeaderChangeBatch = (TestLeaderChangeBatch) batch;
+                leader = testLeaderChangeBatch.newLeader;
             }
             for (LocalLogManager logManager : logManagers.values()) {
                 logManager.scheduleLogCheck();
@@ -263,7 +263,7 @@ public final class LocalLogManager implements RaftClient<ApiMessageAndVersion>, 
             }
             LeaderAndEpoch newLeader = new LeaderAndEpoch(OptionalInt.of(nextLeaderNode), leader.epoch() + 1);
             log.info("Elected new leader: {}.", newLeader);
-            append(new LeaderChangeBatch(newLeader));
+            append(new TestLeaderChangeBatch(newLeader));
         }
 
         synchronized LeaderAndEpoch leaderAndEpoch() {
@@ -495,8 +495,8 @@ public final class LocalLogManager implements RaftClient<ApiMessageAndVersion>, 
                                 nodeId, numEntriesFound, entryOffset, maxReadOffset);
                             break;
                         }
-                        if (entry.getValue() instanceof LeaderChangeBatch) {
-                            LeaderChangeBatch batch = (LeaderChangeBatch) entry.getValue();
+                        if (entry.getValue() instanceof TestLeaderChangeBatch) {
+                            TestLeaderChangeBatch batch = (TestLeaderChangeBatch) entry.getValue();
                             log.trace("Node {}: handling LeaderChange to {}.",
                                 nodeId, batch.newLeader);
                             // Only notify the listener if it equals the shared leader state
@@ -699,7 +699,7 @@ public final class LocalLogManager implements RaftClient<ApiMessageAndVersion>, 
     public void resign(int epoch) {
         LeaderAndEpoch curLeader = leader;
         LeaderAndEpoch nextLeader = new LeaderAndEpoch(OptionalInt.empty(), curLeader.epoch() + 1);
-        shared.tryAppend(nodeId, curLeader.epoch(), new LeaderChangeBatch(nextLeader));
+        shared.tryAppend(nodeId, curLeader.epoch(), new TestLeaderChangeBatch(nextLeader));
     }
 
     @Override
