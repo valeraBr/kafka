@@ -16,38 +16,25 @@
  */
 package org.apache.kafka.jmh.record;
 
-import kafka.common.LongRef;
-import kafka.log.AppendOrigin;
-import kafka.log.LogValidator;
-import org.apache.kafka.common.TopicPartition;
 import org.apache.kafka.common.record.CompressionConfig;
-import org.apache.kafka.common.record.MemoryRecords;
-import org.apache.kafka.common.record.TimestampType;
-import org.openjdk.jmh.annotations.Benchmark;
 import org.openjdk.jmh.annotations.Fork;
 import org.openjdk.jmh.annotations.Measurement;
+import org.openjdk.jmh.annotations.Param;
 import org.openjdk.jmh.annotations.Scope;
 import org.openjdk.jmh.annotations.State;
 import org.openjdk.jmh.annotations.Warmup;
-import org.openjdk.jmh.infra.Blackhole;
 
 @State(Scope.Benchmark)
 @Fork(value = 1)
 @Warmup(iterations = 5)
 @Measurement(iterations = 15)
-public class UncompressedRecordBatchValidationBenchmark extends BaseRecordBatchBenchmark {
+public class ZstdCompressedRecordBatchValidationBenchmark extends AbstractCompressedRecordBatchValidationBenchmark {
+
+    @Param(value = {"1", "6", "12", "17", "22"})
+    private int level = 3;
 
     @Override
     CompressionConfig compressionConfig() {
-        return CompressionConfig.NONE;
-    }
-
-    @Benchmark
-    public void measureAssignOffsetsNonCompressed(Blackhole bh) {
-        MemoryRecords records = MemoryRecords.readableRecords(singleBatchBuffer.duplicate());
-        LogValidator.assignOffsetsNonCompressed(records, new TopicPartition("a", 0),
-                new LongRef(startingOffset), System.currentTimeMillis(), false,
-                TimestampType.CREATE_TIME, Long.MAX_VALUE, 0,
-                new AppendOrigin.Client$(), messageVersion, brokerTopicStats);
+        return CompressionConfig.zstd().level(level).build();
     }
 }

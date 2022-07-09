@@ -35,7 +35,7 @@ import java.util.List;
 import java.util.Random;
 import java.util.stream.Stream;
 
-import static org.apache.kafka.common.compress.KafkaLZ4BlockOutputStream.LZ4_FRAME_INCOMPRESSIBLE_MASK;
+import static org.apache.kafka.common.compress.Lz4OutputStream.LZ4_FRAME_INCOMPRESSIBLE_MASK;
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -67,14 +67,16 @@ public class KafkaLZ4Test {
     private static class Args {
         final boolean useBrokenFlagDescriptorChecksum;
         final boolean ignoreFlagDescriptorChecksum;
-        final byte[] payload;
-        final boolean close;
+        final int level;
         final boolean blockChecksum;
+        final boolean close;
+        final byte[] payload;
 
         Args(boolean useBrokenFlagDescriptorChecksum, boolean ignoreFlagDescriptorChecksum,
-             boolean blockChecksum, boolean close, Payload payload) {
+             int level, boolean blockChecksum, boolean close, Payload payload) {
             this.useBrokenFlagDescriptorChecksum = useBrokenFlagDescriptorChecksum;
             this.ignoreFlagDescriptorChecksum = ignoreFlagDescriptorChecksum;
+            this.level = level;
             this.blockChecksum = blockChecksum;
             this.close = close;
             this.payload = payload.payload;
@@ -84,6 +86,7 @@ public class KafkaLZ4Test {
         public String toString() {
             return "useBrokenFlagDescriptorChecksum=" + useBrokenFlagDescriptorChecksum +
                 ", ignoreFlagDescriptorChecksum=" + ignoreFlagDescriptorChecksum +
+                ", compressionLevel=" + level +
                 ", blockChecksum=" + blockChecksum +
                 ", close=" + close +
                 ", payload=" + Arrays.toString(payload);
@@ -113,9 +116,11 @@ public class KafkaLZ4Test {
             for (Payload payload : payloads)
                 for (boolean broken : Arrays.asList(false, true))
                     for (boolean ignore : Arrays.asList(false, true))
-                        for (boolean blockChecksum : Arrays.asList(false, true))
-                            for (boolean close : Arrays.asList(false, true))
-                                arguments.add(Arguments.of(new Args(broken, ignore, blockChecksum, close, payload)));
+                        // Available levels: 1, 2, ... 17.
+                        for (int compressionLevel = 1; compressionLevel < 18; ++compressionLevel)
+                            for (boolean blockChecksum : Arrays.asList(false, true))
+                                for (boolean close : Arrays.asList(false, true))
+                                    arguments.add(Arguments.of(new Args(broken, ignore, compressionLevel, blockChecksum, close, payload)));
 
             return arguments.stream();
         }
@@ -356,9 +361,10 @@ public class KafkaLZ4Test {
 
     private byte[] compressedBytes(Args args) throws IOException {
         ByteArrayOutputStream output = new ByteArrayOutputStream();
-        KafkaLZ4BlockOutputStream lz4 = new KafkaLZ4BlockOutputStream(
+        Lz4OutputStream lz4 = new Lz4OutputStream(
             output,
-            KafkaLZ4BlockOutputStream.BLOCKSIZE_64KB,
+            Lz4OutputStream.BLOCKSIZE_64KB,
+            args.level,
             args.blockChecksum,
             args.useBrokenFlagDescriptorChecksum
         );

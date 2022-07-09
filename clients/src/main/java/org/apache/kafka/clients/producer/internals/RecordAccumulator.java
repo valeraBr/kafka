@@ -44,7 +44,7 @@ import org.apache.kafka.common.header.Header;
 import org.apache.kafka.common.metrics.Metrics;
 import org.apache.kafka.common.record.AbstractRecords;
 import org.apache.kafka.common.record.CompressionRatioEstimator;
-import org.apache.kafka.common.record.CompressionType;
+import org.apache.kafka.common.record.CompressionConfig;
 import org.apache.kafka.common.record.MemoryRecords;
 import org.apache.kafka.common.record.MemoryRecordsBuilder;
 import org.apache.kafka.common.record.Record;
@@ -70,7 +70,7 @@ public class RecordAccumulator {
     private final AtomicInteger flushesInProgress;
     private final AtomicInteger appendsInProgress;
     private final int batchSize;
-    private final CompressionType compression;
+    private final CompressionConfig compression;
     private final int lingerMs;
     private final long retryBackoffMs;
     private final int deliveryTimeoutMs;
@@ -93,7 +93,7 @@ public class RecordAccumulator {
      *
      * @param logContext The log context used for logging
      * @param batchSize The size to use when allocating {@link MemoryRecords} instances
-     * @param compression The compression codec for the records
+     * @param compressionConfig The compression configuration for the records
      * @param lingerMs An artificial delay time to add before declaring a records instance that isn't full ready for
      *        sending. This allows time for more records to arrive. Setting a non-zero lingerMs will trade off some
      *        latency for potentially better throughput due to more batching (and hence fewer, larger requests).
@@ -111,7 +111,7 @@ public class RecordAccumulator {
      */
     public RecordAccumulator(LogContext logContext,
                              int batchSize,
-                             CompressionType compression,
+                             CompressionConfig compressionConfig,
                              int lingerMs,
                              long retryBackoffMs,
                              int deliveryTimeoutMs,
@@ -128,7 +128,7 @@ public class RecordAccumulator {
         this.flushesInProgress = new AtomicInteger(0);
         this.appendsInProgress = new AtomicInteger(0);
         this.batchSize = batchSize;
-        this.compression = compression;
+        this.compression = compressionConfig;
         this.lingerMs = lingerMs;
         this.retryBackoffMs = retryBackoffMs;
         this.deliveryTimeoutMs = deliveryTimeoutMs;
@@ -149,7 +149,7 @@ public class RecordAccumulator {
      *
      * @param logContext The log context used for logging
      * @param batchSize The size to use when allocating {@link MemoryRecords} instances
-     * @param compression The compression codec for the records
+     * @param compressionConfig The compression configuration for the records
      * @param lingerMs An artificial delay time to add before declaring a records instance that isn't full ready for
      *        sending. This allows time for more records to arrive. Setting a non-zero lingerMs will trade off some
      *        latency for potentially better throughput due to more batching (and hence fewer, larger requests).
@@ -166,7 +166,7 @@ public class RecordAccumulator {
      */
     public RecordAccumulator(LogContext logContext,
                              int batchSize,
-                             CompressionType compression,
+                             CompressionConfig compressionConfig,
                              int lingerMs,
                              long retryBackoffMs,
                              int deliveryTimeoutMs,
@@ -178,7 +178,7 @@ public class RecordAccumulator {
                              BufferPool bufferPool) {
         this(logContext,
             batchSize,
-            compression,
+            compressionConfig,
             lingerMs,
             retryBackoffMs,
             deliveryTimeoutMs,
@@ -295,7 +295,7 @@ public class RecordAccumulator {
 
                 if (buffer == null) {
                     byte maxUsableMagic = apiVersions.maxUsableProduceMagic();
-                    int size = Math.max(this.batchSize, AbstractRecords.estimateSizeInBytesUpperBound(maxUsableMagic, compression, key, value, headers));
+                    int size = Math.max(this.batchSize, AbstractRecords.estimateSizeInBytesUpperBound(maxUsableMagic, compression.type(), key, value, headers));
                     log.trace("Allocating a new {} byte message buffer for topic {} partition {} with remaining timeout {}ms", size, topic, partition, maxTimeToBlock);
                     buffer = free.allocate(size, maxTimeToBlock);
                 }
@@ -470,7 +470,7 @@ public class RecordAccumulator {
         // Reset the estimated compression ratio to the initial value or the big batch compression ratio, whichever
         // is bigger. There are several different ways to do the reset. We chose the most conservative one to ensure
         // the split doesn't happen too often.
-        CompressionRatioEstimator.setEstimation(bigBatch.topicPartition.topic(), compression,
+        CompressionRatioEstimator.setEstimation(bigBatch.topicPartition.topic(), compression.type(),
                                                 Math.max(1.0f, (float) bigBatch.compressionRatio()));
         Deque<ProducerBatch> dq = bigBatch.split(this.batchSize);
         int numSplitBatches = dq.size();

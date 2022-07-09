@@ -14,14 +14,17 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-
 package org.apache.kafka.common.compress;
 
 import com.github.luben.zstd.BufferPool;
 import com.github.luben.zstd.RecyclingBufferPool;
+import com.github.luben.zstd.Zstd;
 import com.github.luben.zstd.ZstdInputStreamNoFinalizer;
 import com.github.luben.zstd.ZstdOutputStreamNoFinalizer;
+
 import org.apache.kafka.common.KafkaException;
+import org.apache.kafka.common.record.CompressionConfig;
+import org.apache.kafka.common.record.CompressionType;
 import org.apache.kafka.common.utils.BufferSupplier;
 import org.apache.kafka.common.utils.ByteBufferInputStream;
 import org.apache.kafka.common.utils.ByteBufferOutputStream;
@@ -32,21 +35,39 @@ import java.io.InputStream;
 import java.io.OutputStream;
 import java.nio.ByteBuffer;
 
-public class ZstdFactory {
+public final class ZstdConfig extends CompressionConfig {
+    /**
+     * Zstd supports compression levels from 1 up to ZSTD_maxCLevel(), which is currently 22. 0 is reserved for
+     * the default level that is controlled by the library (currently 3), and it also supports negative levels
+     * as an experimental feature; It is why MIN_COMPRESSION_LEVEL is not defined here.
+     *
+     * For details, please refer the official zstd manual: http://facebook.github.io/zstd/zstd_manual.html
+     */
+    static final int MAX_COMPRESSION_LEVEL = Zstd.maxCompressionLevel();
+    static final int DEFAULT_COMPRESSION_LEVEL = Zstd.defaultCompressionLevel();
 
-    private ZstdFactory() { }
+    private final int level;
 
-    public static OutputStream wrapForOutput(ByteBufferOutputStream buffer) {
+    private ZstdConfig(int level) {
+        this.level = level;
+    }
+
+    public CompressionType type() {
+        return CompressionType.ZSTD;
+    }
+
+    @Override
+    public OutputStream wrapForOutput(ByteBufferOutputStream bufferStream, byte messageVersion) {
         try {
             // Set input buffer (uncompressed) to 16 KB (none by default) to ensure reasonable performance
             // in cases where the caller passes a small number of bytes to write (potentially a single byte).
-            return new BufferedOutputStream(new ZstdOutputStreamNoFinalizer(buffer, RecyclingBufferPool.INSTANCE), 16 * 1024);
+            return new BufferedOutputStream(new ZstdOutputStreamNoFinalizer(bufferStream, RecyclingBufferPool.INSTANCE, this.level), 16 * 1024);
         } catch (Throwable e) {
             throw new KafkaException(e);
         }
     }
 
-    public static InputStream wrapForInput(ByteBuffer buffer, byte messageVersion, BufferSupplier decompressionBufferSupplier) {
+    public InputStream wrapForInput(ByteBuffer buffer, byte messageVersion, BufferSupplier decompressionBufferSupplier) {
         try {
             // We use our own BufferSupplier instead of com.github.luben.zstd.RecyclingBufferPool since our
             // implementation doesn't require locking or soft references.
@@ -68,6 +89,24 @@ public class ZstdFactory {
                 bufferPool), 16 * 1024);
         } catch (Throwable e) {
             throw new KafkaException(e);
+        }
+    }
+
+    public static class Builder extends CompressionConfig.Builder<ZstdConfig> {
+        private int level = DEFAULT_COMPRESSION_LEVEL;
+
+        public Builder level(int level) {
+            if (MAX_COMPRESSION_LEVEL < level) {
+                throw new IllegalArgumentException("zstd doesn't support given compression level: " + level);
+            }
+
+            this.level = level;
+            return this;
+        }
+
+        @Override
+        public ZstdConfig build() {
+            return new ZstdConfig(this.level);
         }
     }
 }
