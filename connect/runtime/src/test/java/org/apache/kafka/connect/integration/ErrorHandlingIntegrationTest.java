@@ -128,7 +128,7 @@ public class ErrorHandlingIntegrationTest {
         props.put(DLQ_CONTEXT_HEADERS_ENABLE_CONFIG, "true");
         props.put(DLQ_TOPIC_REPLICATION_FACTOR_CONFIG, "1");
 
-        // tolerate all erros
+        // tolerate all errors
         props.put(ERRORS_TOLERANCE_CONFIG, "all");
 
         // retry for up to one second
@@ -153,7 +153,7 @@ public class ErrorHandlingIntegrationTest {
         // consume all records from test topic
         log.info("Consuming records from test topic");
         int i = 0;
-        for (ConsumerRecord<byte[], byte[]> rec : connect.kafka().consume(NUM_RECORDS_PRODUCED, CONSUME_MAX_DURATION_MS, "test-topic")) {
+        for (ConsumerRecord<byte[], byte[]> rec : connect.kafka().consumeAtLeast(NUM_RECORDS_PRODUCED, CONSUME_MAX_DURATION_MS, "test-topic")) {
             String k = new String(rec.key());
             String v = new String(rec.value());
             log.debug("Consumed record (key='{}', value='{}') from topic {}", k, v, rec.topic());
@@ -167,7 +167,7 @@ public class ErrorHandlingIntegrationTest {
 
         // consume failed records from dead letter queue topic
         log.info("Consuming records from test topic");
-        ConsumerRecords<byte[], byte[]> messages = connect.kafka().consume(EXPECTED_INCORRECT_RECORDS, CONSUME_MAX_DURATION_MS, DLQ_TOPIC);
+        ConsumerRecords<byte[], byte[]> messages = connect.kafka().consumeAtLeast(EXPECTED_INCORRECT_RECORDS, CONSUME_MAX_DURATION_MS, DLQ_TOPIC);
         for (ConsumerRecord<byte[], byte[]> recs : messages) {
             log.debug("Consumed record (key={}, value={}) from dead letter queue topic {}",
                     new String(recs.key()), new String(recs.value()), DLQ_TOPIC);
@@ -180,7 +180,6 @@ public class ErrorHandlingIntegrationTest {
         connect.deleteConnector(CONNECTOR_NAME);
         connect.assertions().assertConnectorAndTasksAreStopped(CONNECTOR_NAME,
                 "Connector tasks did not stop in time.");
-
     }
 
     @Test
@@ -205,7 +204,7 @@ public class ErrorHandlingIntegrationTest {
         props.put(DLQ_CONTEXT_HEADERS_ENABLE_CONFIG, "true");
         props.put(DLQ_TOPIC_REPLICATION_FACTOR_CONFIG, "1");
 
-        // tolerate all erros
+        // tolerate all errors
         props.put(ERRORS_TOLERANCE_CONFIG, "all");
 
         // retry for up to one second
@@ -230,7 +229,7 @@ public class ErrorHandlingIntegrationTest {
         // consume all records from test topic
         log.info("Consuming records from test topic");
         int i = 0;
-        for (ConsumerRecord<byte[], byte[]> rec : connect.kafka().consume(NUM_RECORDS_PRODUCED, CONSUME_MAX_DURATION_MS, "test-topic")) {
+        for (ConsumerRecord<byte[], byte[]> rec : connect.kafka().consumeAtLeast(NUM_RECORDS_PRODUCED, CONSUME_MAX_DURATION_MS, "test-topic")) {
             String k = new String(rec.key());
             String v = new String(rec.value());
             log.debug("Consumed record (key='{}', value='{}') from topic {}", k, v, rec.topic());
@@ -244,7 +243,7 @@ public class ErrorHandlingIntegrationTest {
 
         // consume failed records from dead letter queue topic
         log.info("Consuming records from test topic");
-        ConsumerRecords<byte[], byte[]> messages = connect.kafka().consume(EXPECTED_INCORRECT_RECORDS, CONSUME_MAX_DURATION_MS, DLQ_TOPIC);
+        ConsumerRecords<byte[], byte[]> messages = connect.kafka().consumeAtLeast(EXPECTED_INCORRECT_RECORDS, CONSUME_MAX_DURATION_MS, DLQ_TOPIC);
 
         connect.deleteConnector(CONNECTOR_NAME);
         connect.assertions().assertConnectorAndTasksAreStopped(CONNECTOR_NAME,
