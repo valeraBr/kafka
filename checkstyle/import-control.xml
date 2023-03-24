@@ -422,6 +422,10 @@
     <allow pkg="kafka.test" />
     <allow pkg="joptsimple" />
     <allow pkg="javax.rmi.ssl"/>
+    <allow pkg="org.apache.kafka.test" />
+    <allow pkg="org.apache.kafka.tools" />
+    <allow class="org.apache.kafka.tools.ConsoleProducer.ConsoleProducerConfig" />
+    <allow class="org.apache.kafka.tools.ConsoleProducer.LineMessageReader" />
   </subpackage>
 
   <subpackage name="trogdor">
