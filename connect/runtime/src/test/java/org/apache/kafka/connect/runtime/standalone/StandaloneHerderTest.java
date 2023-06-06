@@ -171,7 +171,7 @@ public class StandaloneHerderTest {
         final Capture<Map<String, String>> configCapture = EasyMock.newCapture();
         EasyMock.expect(transformer.transform(EasyMock.capture(configCapture))).andAnswer(configCapture::getValue);
         EasyMock.expect(worker.getPlugins()).andReturn(plugins).times(4);
-        EasyMock.expect(plugins.newConnector(EasyMock.anyString())).andReturn(connectorMock);
+        EasyMock.expect(plugins.newConnector(EasyMock.anyString(), EasyMock.eq(false))).andReturn(connectorMock);
         EasyMock.expect(plugins.connectorLoader(EasyMock.anyString())).andReturn(pluginLoader);
         EasyMock.expect(plugins.withClassLoader(pluginLoader)).andReturn(loaderSwap);
 
@@ -916,7 +916,7 @@ public class StandaloneHerderTest {
         EasyMock.expect(plugins.connectorLoader(EasyMock.anyString())).andReturn(pluginLoader);
         EasyMock.expect(plugins.withClassLoader(pluginLoader)).andReturn(loaderSwap);
         EasyMock.expect(worker.getPlugins()).andStubReturn(plugins);
-        EasyMock.expect(plugins.newConnector(EasyMock.anyString())).andReturn(connectorMock);
+        EasyMock.expect(plugins.newConnector(EasyMock.anyString(), EasyMock.anyBoolean())).andReturn(connectorMock);
         EasyMock.expect(connectorMock.config()).andStubReturn(configDef);
         loaderSwap.close();
         EasyMock.expectLastCall();
@@ -1223,7 +1223,7 @@ public class StandaloneHerderTest {
         EasyMock.expect(plugins.withClassLoader(pluginLoader)).andReturn(loaderSwap);
         if (shouldCreateConnector) {
             EasyMock.expect(worker.getPlugins()).andReturn(plugins);
-            EasyMock.expect(plugins.newConnector(EasyMock.anyString())).andReturn(connectorMock);
+            EasyMock.expect(plugins.newConnector(EasyMock.anyString(), EasyMock.eq(false))).andReturn(connectorMock);
         }
         EasyMock.expect(connectorMock.config()).andStubReturn(new ConfigDef());
 
