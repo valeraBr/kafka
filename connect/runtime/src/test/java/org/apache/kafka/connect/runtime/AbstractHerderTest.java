@@ -205,7 +205,7 @@ public class AbstractHerderTest {
                 .useConstructor(worker, workerId, kafkaClusterId, statusStore, configStore, noneConnectorClientConfigOverridePolicy)
                 .defaultAnswer(CALLS_REAL_METHODS));
 
-        when(plugins.newConnector(anyString(), eq(true))).thenReturn(new SampleSourceConnector());
+        when(plugins.newConnector(anyString())).thenReturn(new SampleSourceConnector());
         when(herder.plugins()).thenReturn(plugins);
 
         when(herder.rawConfig(connectorName)).thenReturn(Collections.singletonMap(
@@ -241,7 +241,7 @@ public class AbstractHerderTest {
                 .useConstructor(worker, workerId, kafkaClusterId, statusStore, configStore, noneConnectorClientConfigOverridePolicy)
                 .defaultAnswer(CALLS_REAL_METHODS));
 
-        when(plugins.newConnector(anyString(), eq(true))).thenThrow(new ConnectException("Unable to find class"));
+        when(plugins.newConnector(anyString())).thenThrow(new ConnectException("Unable to find class"));
         when(herder.plugins()).thenReturn(plugins);
 
         when(herder.rawConfig(connectorName))
@@ -274,7 +274,7 @@ public class AbstractHerderTest {
                 .useConstructor(worker, workerId, kafkaClusterId, statusStore, configStore, noneConnectorClientConfigOverridePolicy)
                 .defaultAnswer(CALLS_REAL_METHODS));
 
-        when(plugins.newConnector(anyString(), eq(true))).thenReturn(new SampleSourceConnector());
+        when(plugins.newConnector(anyString())).thenReturn(new SampleSourceConnector());
         when(herder.plugins()).thenReturn(plugins);
 
         when(configStore.snapshot()).thenReturn(SNAPSHOT);
@@ -319,7 +319,7 @@ public class AbstractHerderTest {
                 .useConstructor(worker, workerId, kafkaClusterId, statusStore, configStore, noneConnectorClientConfigOverridePolicy)
                 .defaultAnswer(CALLS_REAL_METHODS));
 
-        when(plugins.newConnector(anyString(), eq(true))).thenThrow(new ConnectException("No class found"));
+        when(plugins.newConnector(anyString())).thenThrow(new ConnectException("No class found"));
         when(herder.plugins()).thenReturn(plugins);
 
         when(configStore.snapshot()).thenReturn(SNAPSHOT);
@@ -494,7 +494,7 @@ public class AbstractHerderTest {
         PluginDesc<Connector> mockPluginDesc = mock(PluginDesc.class);
         when(mockPluginDesc.className()).thenReturn(SampleSourceConnector.class.getName());
         Mockito.reset(plugins);
-        when(plugins.newConnector("InvalidSourceConnector", false))
+        when(plugins.newConnector("InvalidSourceConnector"))
                 .thenThrow(new ConnectException("Test: Invalid class"));
         when(plugins.connectors()).thenReturn(Collections.singleton(mockPluginDesc));
 
@@ -1122,7 +1122,7 @@ public class AbstractHerderTest {
                 .useConstructor(worker, workerId, kafkaClusterId, statusStore, configStore, noneConnectorClientConfigOverridePolicy)
                 .defaultAnswer(CALLS_REAL_METHODS));
         when(worker.getPlugins()).thenReturn(plugins);
-        when(plugins.newConnector(anyString(), eq(true))).thenThrow(new ConnectException("No class found"));
+        when(plugins.newConnector(anyString())).thenThrow(new ConnectException("No class found"));
         assertEquals(ConnectorType.UNKNOWN, herder.connectorType(Collections.singletonMap(ConnectorConfig.CONNECTOR_CLASS_CONFIG, connName)));
     }
 
@@ -1254,13 +1254,13 @@ public class AbstractHerderTest {
     }
 
     private void mockValidationIsolation(String connectorClass, Connector connector) {
-        when(plugins.newConnector(connectorClass, false)).thenReturn(connector);
+        when(plugins.newConnector(connectorClass)).thenReturn(connector);
         when(plugins.connectorLoader(connectorClass)).thenReturn(classLoader);
         when(plugins.withClassLoader(classLoader)).thenReturn(loaderSwap);
     }
 
     private void verifyValidationIsolation() {
-        verify(plugins).newConnector(anyString(), eq(false));
+        verify(plugins).newConnector(anyString());
         verify(plugins).withClassLoader(classLoader);
         verify(loaderSwap).close();
     }

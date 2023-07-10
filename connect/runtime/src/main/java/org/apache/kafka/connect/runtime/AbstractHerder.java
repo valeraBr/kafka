@@ -472,7 +472,7 @@ public abstract class AbstractHerder implements Herder, TaskStatus.Listener, Con
 
         Connector connector;
         try {
-            connector = getConnector(connType, false);
+            connector = getConnector(connType);
         } catch (ConnectException e) {
             return createConnectorClassError(e.getMessage());
         }
@@ -726,11 +726,7 @@ public abstract class AbstractHerder implements Herder, TaskStatus.Listener, Con
     }
 
     protected Connector getConnector(String connType) {
-        return getConnector(connType, true);
-    }
-
-    protected Connector getConnector(String connType, boolean listTypesInError) {
-        return tempConnectors.computeIfAbsent(connType, k -> plugins().newConnector(k, listTypesInError));
+        return tempConnectors.computeIfAbsent(connType, k -> plugins().newConnector(k));
     }
 
     /**

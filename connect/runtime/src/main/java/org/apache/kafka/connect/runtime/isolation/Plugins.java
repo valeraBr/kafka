@@ -235,19 +235,11 @@ public class Plugins {
     }
 
     public Connector newConnector(String connectorClassOrAlias) {
-        return newConnector(connectorClassOrAlias, true);
-    }
-
-    public Connector newConnector(String connectorClassOrAlias, boolean listTypesInError) {
-        Class<? extends Connector> klass = connectorClass(connectorClassOrAlias, listTypesInError);
+        Class<? extends Connector> klass = connectorClass(connectorClassOrAlias);
         return newPlugin(klass);
     }
 
     public Class<? extends Connector> connectorClass(String connectorClassOrAlias) {
-        return connectorClass(connectorClassOrAlias, true);
-    }
-
-    public Class<? extends Connector> connectorClass(String connectorClassOrAlias, boolean listTypesInError) {
         Class<? extends Connector> klass;
         try {
             klass = pluginClass(
@@ -268,20 +260,20 @@ public class Plugins {
             }
 
             if (matches.isEmpty()) {
-                String message = "Failed to find any class that implements Connector and which name matches "
-                        + connectorClassOrAlias;
-                if (listTypesInError) {
-                    message +=  ", available connectors are: " + Utils.join(connectors, ", ");
-                }
-                throw new ConnectException(message);
+                throw new ConnectException(
+                        "Failed to find any class that implements Connector and which name matches "
+                                + connectorClassOrAlias
+                                + ", available connectors are: "
+                                + Utils.join(connectors, ", ")
+                );
             }
             if (matches.size() > 1) {
-                String message = "More than one connector matches alias " + connectorClassOrAlias;
-                if (listTypesInError) {
-                    message += ". Please use full package and class name instead. Classes found: "
-                            + Utils.join(connectors, ", ");
-                }
-                throw new ConnectException(message);
+                throw new ConnectException(
+                        "More than one connector matches alias "
+                                + connectorClassOrAlias
+                                + ". Please use full package and class name instead. Classes found: "
+                                + Utils.join(connectors, ", ")
+                );
             }
 
             PluginDesc<? extends Connector> entry = matches.get(0);
