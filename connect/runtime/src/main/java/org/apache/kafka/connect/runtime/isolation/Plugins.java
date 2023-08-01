@@ -263,16 +263,13 @@ public class Plugins {
                 throw new ConnectException(
                         "Failed to find any class that implements Connector and which name matches "
                                 + connectorClassOrAlias
-                                + ", available connectors are: "
-                                + Utils.join(connectors, ", ")
                 );
             }
             if (matches.size() > 1) {
                 throw new ConnectException(
                         "More than one connector matches alias "
                                 + connectorClassOrAlias
-                                + ". Please use full package and class name instead. Classes found: "
-                                + Utils.join(connectors, ", ")
+                                + ". Please use full package and class name instead."
                 );
             }
 
