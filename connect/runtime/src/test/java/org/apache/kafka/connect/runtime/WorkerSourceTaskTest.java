@@ -692,11 +692,11 @@ public class WorkerSourceTaskTest {
         expectTopicCreation(TOPIC);
 
         //Using different partitions and offsets for each record, so we can verify all were committed
-        final Map<String, Object> OTHER_OFFSET = Collections.singletonMap("other_key", 13);
-        final Map<String, Object> OTHER_PARTITION = Collections.singletonMap("other_key", "other_partition".getBytes());
+        Map<String, Object> otherOffset = Collections.singletonMap("other_key", 13);
+        Map<String, Object> otherPartition = Collections.singletonMap("other_key", "other_partition".getBytes());
 
         // Send 2 records. The first one gets filtered while the second one goes through.
-        SourceRecord record1 = new SourceRecord(OTHER_PARTITION, OTHER_OFFSET, TOPIC, 1, KEY_SCHEMA, KEY + 1, RECORD_SCHEMA, RECORD);
+        SourceRecord record1 = new SourceRecord(otherPartition, otherOffset, TOPIC, 1, KEY_SCHEMA, KEY + 1, RECORD_SCHEMA, RECORD);
         SourceRecord record2 = new SourceRecord(PARTITION, OFFSET, TOPIC, 2, KEY_SCHEMA, KEY, RECORD_SCHEMA, RECORD);
 
         expectOffsetFlush();
@@ -718,7 +718,7 @@ public class WorkerSourceTaskTest {
         workerTask.commitOffsets();
 
         //All offsets should be committed, even for filtered records.
-        verify(offsetWriter).offset(OTHER_PARTITION, OTHER_OFFSET);
+        verify(offsetWriter).offset(otherPartition, otherOffset);
         verify(offsetWriter).offset(PARTITION, OFFSET);
         verify(sourceTask).commitRecord(any(SourceRecord.class), isNull());
 
