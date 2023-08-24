@@ -136,6 +136,7 @@ class DynamicBrokerReconfigurationTest extends QuorumTestHarness with SaslSetup 
       props.put(KafkaConfig.PasswordEncoderSecretProp, "dynamic-config-secret")
       props.put(KafkaConfig.LogRetentionTimeMillisProp, 1680000000.toString)
       props.put(KafkaConfig.LogRetentionTimeHoursProp, 168.toString)
+      props.put(KafkaConfig.LogRollTimeHoursProp, 24.toString)
 
       props ++= sslProperties1
       props ++= securityProps(sslProperties1, KEYSTORE_PROPS, listenerPrefix(SecureInternal))
@@ -251,7 +252,7 @@ class DynamicBrokerReconfigurationTest extends QuorumTestHarness with SaslSetup 
     val expectedProps = new Properties
     expectedProps.setProperty(KafkaConfig.LogRetentionTimeMillisProp, "1680000000")
     expectedProps.setProperty(KafkaConfig.LogRetentionTimeHoursProp, "168")
-    expectedProps.setProperty(KafkaConfig.LogRollTimeHoursProp, "168")
+    expectedProps.setProperty(KafkaConfig.LogRollTimeHoursProp, "24")
     expectedProps.setProperty(KafkaConfig.LogCleanerThreadsProp, "1")
     val logRetentionMs = configEntry(configDesc, KafkaConfig.LogRetentionTimeMillisProp)
     verifyConfig(KafkaConfig.LogRetentionTimeMillisProp, logRetentionMs,
@@ -275,7 +276,8 @@ class DynamicBrokerReconfigurationTest extends QuorumTestHarness with SaslSetup 
     assertEquals(List((KafkaConfig.LogRetentionTimeHoursProp, ConfigSource.STATIC_BROKER_CONFIG),
       (KafkaConfig.LogRetentionTimeHoursProp, ConfigSource.DEFAULT_CONFIG)),
       synonymsList(logRetentionHours))
-    assertEquals(List((KafkaConfig.LogRollTimeHoursProp, ConfigSource.DEFAULT_CONFIG)), synonymsList(logRollHours))
+    assertEquals(List((KafkaConfig.LogRollTimeHoursProp, ConfigSource.STATIC_BROKER_CONFIG),
+      (KafkaConfig.LogRollTimeHoursProp, ConfigSource.DEFAULT_CONFIG)), synonymsList(logRollHours))
     assertEquals(List((KafkaConfig.LogCleanerThreadsProp, ConfigSource.DEFAULT_CONFIG)), synonymsList(logCleanerThreads))
   }
 
@@ -617,7 +619,7 @@ class DynamicBrokerReconfigurationTest extends QuorumTestHarness with SaslSetup 
   }
 
   @Test
-  @Disabled // TODO: To be re-enabled once we can make it less flaky: KAFKA-6527
+//  @Disabled // TODO: To be re-enabled once we can make it less flaky: KAFKA-6527
   def testDefaultTopicConfig(): Unit = {
     val (producerThread, consumerThread) = startProduceConsume(retries = 0)
 
@@ -695,6 +697,20 @@ class DynamicBrokerReconfigurationTest extends QuorumTestHarness with SaslSetup 
       props.put(k, v)
       reconfigureServers(props, perBrokerConfig = false, (k, props.getProperty(k)), expectFailure = true)
     }
+
+    // Verify that non-primary synonyms value is retained when altering config
+    val logRollHours: Long = servers.head.config.originals.get(KafkaConfig.LogRollTimeHoursProp).asInstanceOf[String].toLong
+    assertEquals(logRollHours * 60 * 60 * 1000, log.config.segmentMs)
+    // Verify that adding primary synonym value reflects on Log config
+    props.clear()
+    props.put(KafkaConfig.LogRollTimeMillisProp, "500000")
+    alterConfigsOnServer(servers.head, props)
+    TestUtils.waitUntilTrue(() => log.config.segmentMs == 500000, "Log roll time alter config not applied")
+    // Verify that log config falls back onto non primary synonym when primary synonyms dynamic config is deleted
+    props.clear()
+    props.put(KafkaConfig.LogRollTimeMillisProp, "")
+    TestUtils.incrementalAlterConfigs(servers.take(1), adminClients.head, props, perBrokerConfig = true, opType = OpType.DELETE).all.get
+    TestUtils.waitUntilTrue(() => log.config.segmentMs == logRollHours * 60 * 60 * 1000, "Log roll time did not fallback on non-primary synonym")
 
     // Verify that even though broker defaults can be defined at default cluster level for consistent
     // configuration across brokers, they can also be defined at per-broker level for testing
