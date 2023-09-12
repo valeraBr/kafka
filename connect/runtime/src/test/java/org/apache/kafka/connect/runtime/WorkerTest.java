@@ -39,6 +39,7 @@ import org.apache.kafka.common.config.AbstractConfig;
 import org.apache.kafka.common.config.ConfigException;
 import org.apache.kafka.common.config.provider.MockFileConfigProvider;
 import org.apache.kafka.common.errors.ClusterAuthorizationException;
+import org.apache.kafka.common.errors.SaslAuthenticationException;
 import org.apache.kafka.common.internals.KafkaFutureImpl;
 import org.apache.kafka.common.metrics.MetricsReporter;
 import org.apache.kafka.common.metrics.stats.Avg;
@@ -1903,6 +1904,40 @@ public class WorkerTest {
         worker.start();
 
         when(offsetStore.connectorPartitions(CONNECTOR_ID)).thenThrow(new ConnectException("Test exception"));
+
+        FutureCallback<ConnectorOffsets> cb = new FutureCallback<>();
+        worker.sourceConnectorOffsets(CONNECTOR_ID, offsetStore, offsetReader, cb);
+        ExecutionException e = assertThrows(ExecutionException.class, () -> cb.get(1000, TimeUnit.MILLISECONDS));
+        assertEquals(ConnectException.class, e.getCause().getClass());
+
+        verify(offsetStore).start();
+        verify(offsetReader).close();
+        verify(offsetStore).stop();
+        verifyKafkaClusterId();
+    }
+
+    @Test
+    public void testGetSourceConnectorOffsetsFetchError() {
+        mockKafkaClusterId();
+
+        ConnectorOffsetBackingStore offsetStore = mock(ConnectorOffsetBackingStore.class);
+        CloseableOffsetStorageReader offsetReader = mock(CloseableOffsetStorageReader.class);
+
+        Set<Map<String, Object>> connectorPartitions =
+                Collections.singleton(Collections.singletonMap("partitionKey", "partitionValue"));
+
+        when(executorService.submit(any(Runnable.class))).thenAnswer(invocation -> {
+            invocation.getArgument(0, Runnable.class).run();
+            return null;
+        });
+        worker = new Worker(WORKER_ID, new MockTime(), plugins, config, offsetBackingStore, executorService,
+                allConnectorClientConfigOverridePolicy, null);
+        worker.start();
+
+        when(offsetStore.connectorPartitions(CONNECTOR_ID)).thenReturn(connectorPartitions);
+        doAnswer(invocation -> {
+            throw new ExecutionException(new SaslAuthenticationException("error"));
+        }).when(offsetReader).offsets(connectorPartitions);
 
         FutureCallback<ConnectorOffsets> cb = new FutureCallback<>();
         worker.sourceConnectorOffsets(CONNECTOR_ID, offsetStore, offsetReader, cb);
