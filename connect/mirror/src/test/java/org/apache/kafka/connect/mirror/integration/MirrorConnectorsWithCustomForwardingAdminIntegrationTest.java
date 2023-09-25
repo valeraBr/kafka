@@ -16,6 +16,7 @@
  */
 package org.apache.kafka.connect.mirror.integration;
 
+import kafka.server.KafkaConfig;
 import org.apache.kafka.clients.admin.Admin;
 import org.apache.kafka.clients.admin.NewPartitions;
 import org.apache.kafka.common.acl.AccessControlEntry;
@@ -67,17 +68,18 @@ public class MirrorConnectorsWithCustomForwardingAdminIntegrationTest extends Mi
      * enable ACL on brokers.
      */
     protected static void enableAclAuthorizer(Properties brokerProps) {
-        brokerProps.put("authorizer.class.name", "kafka.security.authorizer.AclAuthorizer");
-        brokerProps.put("sasl.enabled.mechanisms", "PLAIN");
-        brokerProps.put("sasl.mechanism.inter.broker.protocol", "PLAIN");
-        brokerProps.put("security.inter.broker.protocol", "SASL_PLAINTEXT");
-        brokerProps.put("listeners", "SASL_PLAINTEXT://localhost:0");
-        brokerProps.put("listener.name.sasl_plaintext.plain.sasl.jaas.config",
-                "org.apache.kafka.common.security.plain.PlainLoginModule required "
-                        + "username=\"super\" "
-                        + "password=\"super_pwd\" "
-                        + "user_connector=\"connector_pwd\" "
-                        + "user_super=\"super_pwd\";");
+        brokerProps.put(KafkaConfig.ListenerSecurityProtocolMapProp(), "CONTROLLER:SASL_PLAINTEXT,EXTERNAL:SASL_PLAINTEXT");
+        brokerProps.put(KafkaConfig.AuthorizerClassNameProp(), "org.apache.kafka.metadata.authorizer.StandardAuthorizer");
+        brokerProps.put(KafkaConfig.SaslEnabledMechanismsProp(), "PLAIN");
+        brokerProps.put(KafkaConfig.SaslMechanismInterBrokerProtocolProp(), "PLAIN");
+        brokerProps.put(KafkaConfig.SaslMechanismControllerProtocolProp(), "PLAIN");
+        String listenerSaslJaasConfig = "org.apache.kafka.common.security.plain.PlainLoginModule required "
+                + "username=\"super\" "
+                + "password=\"super_pwd\" "
+                + "user_connector=\"connector_pwd\" "
+                + "user_super=\"super_pwd\";";
+        brokerProps.put("listener.name.external.plain.sasl.jaas.config", listenerSaslJaasConfig);
+        brokerProps.put("listener.name.controller.plain.sasl.jaas.config", listenerSaslJaasConfig);
         brokerProps.put("super.users", "User:super");
     }
 
