@@ -819,10 +819,12 @@ class UnifiedLog(@volatile var logStartOffset: Long,
             if (config.messageTimestampType == TimestampType.LOG_APPEND_TIME)
               appendInfo.setLogAppendTime(validateAndOffsetAssignResult.logAppendTimeMs)
 
+
             // re-validate message sizes if there's a possibility that they have changed (due to re-compression or message
             // format conversion)
             if (!ignoreRecordSize && validateAndOffsetAssignResult.messageSizeMaybeChanged) {
               validRecords.batches.forEach { batch =>
+
                 if (batch.sizeInBytes > config.maxMessageSize) {
                   // we record the original message set size instead of the trimmed size
                   // to be consistent with pre-compression bytesRejectedRate recording

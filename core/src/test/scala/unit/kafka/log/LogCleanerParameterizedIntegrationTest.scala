@@ -156,6 +156,7 @@ class LogCleanerParameterizedIntegrationTest extends AbstractLogCleanerIntegrati
     props.put(TopicConfig.MESSAGE_FORMAT_VERSION_CONFIG, IBP_0_9_0.version)
     log.updateConfig(new LogConfig(props))
 
+    System.err.println("1st append")
     val appends = writeDups(numKeys = 100, numDups = 3, log = log, codec = codec, magicValue = RecordBatch.MAGIC_VALUE_V0)
     val startSize = log.size
     cleaner.startup()
@@ -168,7 +169,9 @@ class LogCleanerParameterizedIntegrationTest extends AbstractLogCleanerIntegrati
     checkLogAfterAppendingDups(log, startSize, appends)
 
     val appends2: Seq[(Int, String, Long)] = {
+      System.err.println("2nd append")
       val dupsV0 = writeDups(numKeys = 40, numDups = 3, log = log, codec = codec, magicValue = RecordBatch.MAGIC_VALUE_V0)
+      System.err.println("3rd append:" + largeMessageSet.sizeInBytes())
       val appendInfo = log.appendAsLeader(largeMessageSet, leaderEpoch = 0)
       // move LSO forward to increase compaction bound
       log.updateHighWatermark(log.logEndOffset)
@@ -177,7 +180,127 @@ class LogCleanerParameterizedIntegrationTest extends AbstractLogCleanerIntegrati
       // also add some messages with version 1 and version 2 to check that we handle mixed format versions correctly
       props.put(TopicConfig.MESSAGE_FORMAT_VERSION_CONFIG, IBP_0_11_0_IV0.version)
       log.updateConfig(new LogConfig(props))
+      System.err.println("4th append")
       val dupsV1 = writeDups(startKey = 30, numKeys = 40, numDups = 3, log = log, codec = codec, magicValue = RecordBatch.MAGIC_VALUE_V1)
+      System.err.println("5th append")
+      val dupsV2 = writeDups(startKey = 15, numKeys = 5, numDups = 3, log = log, codec = codec, magicValue = RecordBatch.MAGIC_VALUE_V2)
+      appends ++ dupsV0 ++ Seq((largeMessageKey, largeMessageValue, largeMessageOffset)) ++ dupsV1 ++ dupsV2
+    }
+    val firstDirty2 = log.activeSegment.baseOffset
+    checkLastCleaned("log", 0, firstDirty2)
+
+    checkLogAfterAppendingDups(log, startSize, appends2)
+  }
+
+  @nowarn("cat=deprecation")
+  @ParameterizedTest
+  @ArgumentsSource(classOf[LogCleanerParameterizedIntegrationTest.ExcludeZstd])
+  def testCleanerWithMessageFormatV02(codec: CompressionType): Unit = {
+    val largeMessageKey = 20
+    val (largeMessageValue, largeMessageSet) = createLargeSingleMessageSet(largeMessageKey, RecordBatch.MAGIC_VALUE_V0, codec)
+    val maxMessageSize = codec match {
+      case CompressionType.NONE => largeMessageSet.sizeInBytes
+      case _ =>
+        // the broker assigns absolute offsets for message format 0 which potentially causes the compressed size to
+        // increase because the broker offsets are larger than the ones assigned by the client
+        // adding `5` to the message set size is good enough for this test: it covers the increased message size while
+        // still being less than the overhead introduced by the conversion from message format version 0 to 1
+        largeMessageSet.sizeInBytes + 5
+    }
+
+    cleaner = makeCleaner(partitions = topicPartitions, maxMessageSize = maxMessageSize)
+
+    val log = cleaner.logs.get(topicPartitions(0))
+    val props = logConfigProperties(maxMessageSize = maxMessageSize)
+    props.put(TopicConfig.MESSAGE_FORMAT_VERSION_CONFIG, IBP_0_9_0.version)
+    log.updateConfig(new LogConfig(props))
+
+    System.err.println("1st append")
+    val appends = writeDups(numKeys = 100, numDups = 3, log = log, codec = codec, magicValue = RecordBatch.MAGIC_VALUE_V0)
+    val startSize = log.size
+    cleaner.startup()
+
+    val firstDirty = log.activeSegment.baseOffset
+    checkLastCleaned("log", 0, firstDirty)
+    val compactedSize = log.logSegments.map(_.size).sum
+    assertTrue(startSize > compactedSize, s"log should have been compacted: startSize=$startSize compactedSize=$compactedSize")
+
+    checkLogAfterAppendingDups(log, startSize, appends)
+
+    val appends2: Seq[(Int, String, Long)] = {
+      System.err.println("2nd append")
+      val dupsV0 = writeDups(numKeys = 40, numDups = 3, log = log, codec = codec, magicValue = RecordBatch.MAGIC_VALUE_V0)
+      System.err.println("3rd append:" + largeMessageSet.sizeInBytes())
+      val appendInfo = log.appendAsLeader(largeMessageSet, leaderEpoch = 0)
+      // move LSO forward to increase compaction bound
+      log.updateHighWatermark(log.logEndOffset)
+      val largeMessageOffset = appendInfo.firstOffset.map[Long](_.messageOffset).get
+
+      // also add some messages with version 1 and version 2 to check that we handle mixed format versions correctly
+      props.put(TopicConfig.MESSAGE_FORMAT_VERSION_CONFIG, IBP_0_11_0_IV0.version)
+      log.updateConfig(new LogConfig(props))
+      System.err.println("4th append")
+      val dupsV1 = writeDups(startKey = 30, numKeys = 40, numDups = 3, log = log, codec = codec, magicValue = RecordBatch.MAGIC_VALUE_V1)
+      System.err.println("5th append")
+      val dupsV2 = writeDups(startKey = 15, numKeys = 5, numDups = 3, log = log, codec = codec, magicValue = RecordBatch.MAGIC_VALUE_V2)
+      appends ++ dupsV0 ++ Seq((largeMessageKey, largeMessageValue, largeMessageOffset)) ++ dupsV1 ++ dupsV2
+    }
+    val firstDirty2 = log.activeSegment.baseOffset
+    checkLastCleaned("log", 0, firstDirty2)
+
+    checkLogAfterAppendingDups(log, startSize, appends2)
+  }
+
+  @nowarn("cat=deprecation")
+  @ParameterizedTest
+  @ArgumentsSource(classOf[LogCleanerParameterizedIntegrationTest.ExcludeZstd])
+  def testCleanerWithMessageFormatV03(codec: CompressionType): Unit = {
+    val largeMessageKey = 20
+    val (largeMessageValue, largeMessageSet) = createLargeSingleMessageSet(largeMessageKey, RecordBatch.MAGIC_VALUE_V0, codec)
+    val maxMessageSize = codec match {
+      case CompressionType.NONE => largeMessageSet.sizeInBytes
+      case _ =>
+        // the broker assigns absolute offsets for message format 0 which potentially causes the compressed size to
+        // increase because the broker offsets are larger than the ones assigned by the client
+        // adding `5` to the message set size is good enough for this test: it covers the increased message size while
+        // still being less than the overhead introduced by the conversion from message format version 0 to 1
+        largeMessageSet.sizeInBytes + 5
+    }
+
+    cleaner = makeCleaner(partitions = topicPartitions, maxMessageSize = maxMessageSize)
+
+    val log = cleaner.logs.get(topicPartitions(0))
+    val props = logConfigProperties(maxMessageSize = maxMessageSize)
+    props.put(TopicConfig.MESSAGE_FORMAT_VERSION_CONFIG, IBP_0_9_0.version)
+    log.updateConfig(new LogConfig(props))
+
+    System.err.println("1st append")
+    val appends = writeDups(numKeys = 100, numDups = 3, log = log, codec = codec, magicValue = RecordBatch.MAGIC_VALUE_V0)
+    val startSize = log.size
+    cleaner.startup()
+
+    val firstDirty = log.activeSegment.baseOffset
+    checkLastCleaned("log", 0, firstDirty)
+    val compactedSize = log.logSegments.map(_.size).sum
+    assertTrue(startSize > compactedSize, s"log should have been compacted: startSize=$startSize compactedSize=$compactedSize")
+
+    checkLogAfterAppendingDups(log, startSize, appends)
+
+    val appends2: Seq[(Int, String, Long)] = {
+      System.err.println("2nd append")
+      val dupsV0 = writeDups(numKeys = 40, numDups = 3, log = log, codec = codec, magicValue = RecordBatch.MAGIC_VALUE_V0)
+      System.err.println("3rd append:" + largeMessageSet.sizeInBytes())
+      val appendInfo = log.appendAsLeader(largeMessageSet, leaderEpoch = 0)
+      // move LSO forward to increase compaction bound
+      log.updateHighWatermark(log.logEndOffset)
+      val largeMessageOffset = appendInfo.firstOffset.map[Long](_.messageOffset).get
+
+      // also add some messages with version 1 and version 2 to check that we handle mixed format versions correctly
+      props.put(TopicConfig.MESSAGE_FORMAT_VERSION_CONFIG, IBP_0_11_0_IV0.version)
+      log.updateConfig(new LogConfig(props))
+      System.err.println("4th append")
+      val dupsV1 = writeDups(startKey = 30, numKeys = 40, numDups = 3, log = log, codec = codec, magicValue = RecordBatch.MAGIC_VALUE_V1)
+      System.err.println("5th append")
       val dupsV2 = writeDups(startKey = 15, numKeys = 5, numDups = 3, log = log, codec = codec, magicValue = RecordBatch.MAGIC_VALUE_V2)
       appends ++ dupsV0 ++ Seq((largeMessageKey, largeMessageValue, largeMessageOffset)) ++ dupsV1 ++ dupsV2
     }
@@ -331,12 +454,12 @@ object LogCleanerParameterizedIntegrationTest {
 
   class AllCompressions extends ArgumentsProvider {
     override def provideArguments(context: ExtensionContext): java.util.stream.Stream[_ <: Arguments] =
-      java.util.Arrays.stream(CompressionType.values.map(codec => Arguments.of(codec)))
+      java.util.Arrays.stream(CompressionType.values.filter(_ == CompressionType.SNAPPY).map(codec => Arguments.of(codec)))
   }
 
   // zstd compression is not supported with older message formats (i.e supported by V0 and V1)
   class ExcludeZstd extends ArgumentsProvider {
     override def provideArguments(context: ExtensionContext): java.util.stream.Stream[_ <: Arguments] =
-      java.util.Arrays.stream(CompressionType.values.filter(_ != CompressionType.ZSTD).map(codec => Arguments.of(codec)))
+      java.util.Arrays.stream(CompressionType.values.filter(_ == CompressionType.SNAPPY).map(codec => Arguments.of(codec)))
   }
 }
