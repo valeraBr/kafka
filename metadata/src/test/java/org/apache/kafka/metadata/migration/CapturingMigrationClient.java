@@ -77,6 +77,9 @@ class CapturingMigrationClient implements MigrationClient {
         }
     }
 
+    public Long capturedProducerId = -1L;
+    private ProducerIdsBlock producerIdBlock = ProducerIdsBlock.EMPTY;
+
     private final Set<Integer> brokerIds;
     private final TopicMigrationClient topicMigrationClient;
     private final ConfigMigrationClient configMigrationClient;
@@ -148,7 +151,11 @@ class CapturingMigrationClient implements MigrationClient {
 
     @Override
     public Optional<ProducerIdsBlock> readProducerId() {
-        return Optional.empty();
+        return Optional.ofNullable(producerIdBlock);
+    }
+
+    public void setReadProducerId(ProducerIdsBlock producerIdBlock) {
+        this.producerIdBlock = producerIdBlock;
     }
 
     @Override
@@ -156,6 +163,7 @@ class CapturingMigrationClient implements MigrationClient {
         long nextProducerId,
         ZkMigrationLeadershipState state
     ) {
+        this.capturedProducerId = nextProducerId;
         this.state = state;
         return state;
     }

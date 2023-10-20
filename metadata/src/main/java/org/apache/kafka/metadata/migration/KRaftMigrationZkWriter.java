@@ -65,19 +65,19 @@ import java.util.stream.Collectors;
 
 public class KRaftMigrationZkWriter {
 
-    private static final String UPDATE_PRODUCER_ID = "UpdateProducerId";
-    private static final String CREATE_TOPIC = "CreateTopic";
-    private static final String UPDATE_TOPIC = "UpdateTopic";
-    private static final String DELETE_TOPIC = "DeleteTopic";
-    private static final String UPDATE_PARTITION = "UpdatePartition";
-    private static final String DELETE_PARTITION = "DeletePartition";
-    private static final String UPDATE_BROKER_CONFIG = "UpdateBrokerConfig";
-    private static final String DELETE_BROKER_CONFIG = "DeleteBrokerConfig";
-    private static final String UPDATE_TOPIC_CONFIG = "UpdateTopicConfig";
-    private static final String DELETE_TOPIC_CONFIG = "DeleteTopicConfig";
-    private static final String UPDATE_CLIENT_QUOTA = "UpdateClientQuota";
-    private static final String UPDATE_ACL = "UpdateAcl";
-    private static final String DELETE_ACL = "DeleteAcl";
+    static final String UPDATE_PRODUCER_ID = "UpdateProducerId";
+    static final String CREATE_TOPIC = "CreateTopic";
+    static final String UPDATE_TOPIC = "UpdateTopic";
+    static final String DELETE_TOPIC = "DeleteTopic";
+    static final String UPDATE_PARTITIONS = "UpdatePartitions";
+    static final String DELETE_PARTITION = "DeletePartition";
+    static final String UPDATE_BROKER_CONFIGS = "UpdateBrokerConfigs";
+    static final String DELETE_BROKER_CONFIGS = "DeleteBrokerConfigs";
+    static final String UPDATE_TOPIC_CONFIGS = "UpdateTopicConfigs";
+    static final String DELETE_TOPIC_CONFIGS = "DeleteTopicConfigs";
+    static final String UPDATE_CLIENT_QUOTAS = "UpdateClientQuotas";
+    static final String UPDATE_ACLS = "UpdateAcls";
+    static final String DELETE_ACLS = "DeleteAcls";
 
 
     private final MigrationClient migrationClient;
@@ -238,8 +238,8 @@ public class KRaftMigrationZkWriter {
             );
             ConfigResource resource = new ConfigResource(ConfigResource.Type.TOPIC, topicName);
             operationConsumer.accept(
-                UPDATE_TOPIC_CONFIG,
-                "Updating Configs for Topic " + topicName + ", ID " + topicId,
+                    DELETE_TOPIC_CONFIGS,
+                "Deleting Configs for Topic " + topicName + ", ID " + topicId,
                 migrationState -> migrationClient.configClient().deleteConfigs(resource, migrationState)
             );
         });
@@ -247,7 +247,7 @@ public class KRaftMigrationZkWriter {
         newPartitions.forEach((topicId, partitionMap) -> {
             TopicImage topic = topicsImage.getTopic(topicId);
             operationConsumer.accept(
-                UPDATE_PARTITION,
+                UPDATE_PARTITIONS,
                 "Creating additional partitions for Topic " + topic.name() + ", ID " + topicId,
                 migrationState -> migrationClient.topicClient().updateTopicPartitions(
                     Collections.singletonMap(topic.name(), partitionMap),
@@ -257,7 +257,7 @@ public class KRaftMigrationZkWriter {
         changedPartitions.forEach((topicId, partitionMap) -> {
             TopicImage topic = topicsImage.getTopic(topicId);
             operationConsumer.accept(
-                UPDATE_PARTITION,
+                UPDATE_PARTITIONS,
                 "Updating Partitions for Topic " + topic.name() + ", ID " + topicId,
                 migrationState -> migrationClient.topicClient().updateTopicPartitions(
                     Collections.singletonMap(topic.name(), partitionMap),
@@ -282,6 +282,9 @@ public class KRaftMigrationZkWriter {
     ) {
         topicsDelta.deletedTopicIds().forEach(topicId -> {
             String name = deletedTopicNameResolver.apply(topicId);
+            if (name == null) {
+                throw new RuntimeException("Cannot delete topic with ID " + topicId + " since there is no associated topic name.");
+            }
             operationConsumer.accept(DELETE_TOPIC, "Deleting topic " + name + ", ID " + topicId,
                 migrationState -> migrationClient.topicClient().deleteTopic(name, migrationState));
         });
@@ -310,7 +313,7 @@ public class KRaftMigrationZkWriter {
                 Map<Integer, PartitionRegistration> changedPartitions = new HashMap<>(topicDelta.partitionChanges());
                 if (!newPartitions.isEmpty()) {
                     operationConsumer.accept(
-                        UPDATE_PARTITION,
+                        UPDATE_PARTITIONS,
                         "Create new partitions for Topic " + topicDelta.name() + ", ID " + topicId,
                         migrationState -> migrationClient.topicClient().createTopicPartitions(
                             Collections.singletonMap(topicDelta.name(), newPartitions),
@@ -321,7 +324,7 @@ public class KRaftMigrationZkWriter {
                     // Need a final for the lambda
                     final Map<Integer, PartitionRegistration> finalChangedPartitions = changedPartitions;
                     operationConsumer.accept(
-                        UPDATE_PARTITION,
+                        UPDATE_PARTITIONS,
                         "Updating Partitions for Topic " + topicDelta.name() + ", ID " + topicId,
                         migrationState -> migrationClient.topicClient().updateTopicPartitions(
                             Collections.singletonMap(topicDelta.name(), finalChangedPartitions),
@@ -369,7 +372,7 @@ public class KRaftMigrationZkWriter {
         newResources.forEach(resource -> {
             Map<String, String> props = configsImage.configMapForResource(resource);
             if (!props.isEmpty()) {
-                String opType = brokerOrTopicOpType(resource, UPDATE_BROKER_CONFIG, UPDATE_TOPIC_CONFIG);
+                String opType = brokerOrTopicOpType(resource, UPDATE_BROKER_CONFIGS, UPDATE_TOPIC_CONFIGS);
                 operationConsumer.accept(opType, "Create configs for " + resource.type().name() + " " + resource.name(),
                     migrationState -> migrationClient.configClient().writeConfigs(resource, props, migrationState));
             }
@@ -378,11 +381,11 @@ public class KRaftMigrationZkWriter {
         resourcesToUpdate.forEach(resource -> {
             Map<String, String> props = configsImage.configMapForResource(resource);
             if (props.isEmpty()) {
-                String opType = brokerOrTopicOpType(resource, DELETE_BROKER_CONFIG, DELETE_TOPIC_CONFIG);
+                String opType = brokerOrTopicOpType(resource, DELETE_BROKER_CONFIGS, DELETE_TOPIC_CONFIGS);
                 operationConsumer.accept(opType, "Delete configs for " + resource.type().name() + " " + resource.name(),
                     migrationState -> migrationClient.configClient().deleteConfigs(resource, migrationState));
             } else {
-                String opType = brokerOrTopicOpType(resource, UPDATE_BROKER_CONFIG, UPDATE_TOPIC_CONFIG);
+                String opType = brokerOrTopicOpType(resource, UPDATE_BROKER_CONFIGS, UPDATE_TOPIC_CONFIGS);
                 operationConsumer.accept(opType, "Update configs for " + resource.type().name() + " " + resource.name(),
                     migrationState -> migrationClient.configClient().writeConfigs(resource, props, migrationState));
             }
@@ -456,7 +459,7 @@ public class KRaftMigrationZkWriter {
 
         changedNonUserEntities.forEach(entity -> {
             Map<String, Double> quotaMap = clientQuotasImage.entities().getOrDefault(entity, ClientQuotaImage.EMPTY).quotaMap();
-            opConsumer.accept(UPDATE_CLIENT_QUOTA, "Update client quotas for " + entity, migrationState ->
+            opConsumer.accept(UPDATE_CLIENT_QUOTAS, "Update client quotas for " + entity, migrationState ->
                 migrationClient.configClient().writeClientQuotas(entity.entries(), quotaMap, Collections.emptyMap(), migrationState));
         });
 
@@ -465,7 +468,7 @@ public class KRaftMigrationZkWriter {
             Map<String, Double> quotaMap = clientQuotasImage.entities().
                 getOrDefault(entity, ClientQuotaImage.EMPTY).quotaMap();
             Map<String, String> scramMap = getScramCredentialStringsForUser(scramImage, userName);
-            opConsumer.accept(UPDATE_CLIENT_QUOTA, "Update client quotas for " + userName, migrationState ->
+            opConsumer.accept(UPDATE_CLIENT_QUOTAS, "Update client quotas for " + userName, migrationState ->
                 migrationClient.configClient().writeClientQuotas(entity.entries(), quotaMap, scramMap, migrationState));
         });
     }
@@ -492,10 +495,12 @@ public class KRaftMigrationZkWriter {
         updatedResources.forEach(configResource -> {
             Map<String, String> props = configsImage.configMapForResource(configResource);
             if (props.isEmpty()) {
-                operationConsumer.accept("DeleteConfig", "Delete configs for " + configResource, migrationState ->
+                String opType = brokerOrTopicOpType(configResource, DELETE_BROKER_CONFIGS, DELETE_TOPIC_CONFIGS);
+                operationConsumer.accept(opType, "Delete configs for " + configResource, migrationState ->
                     migrationClient.configClient().deleteConfigs(configResource, migrationState));
             } else {
-                operationConsumer.accept("UpdateConfig", "Update configs for " + configResource, migrationState ->
+                String opType = brokerOrTopicOpType(configResource, UPDATE_BROKER_CONFIGS, UPDATE_TOPIC_CONFIGS);
+                operationConsumer.accept(opType, "Update configs for " + configResource, migrationState ->
                     migrationClient.configClient().writeConfigs(configResource, props, migrationState));
             }
         });
@@ -524,7 +529,7 @@ public class KRaftMigrationZkWriter {
                         users.add(userName);
                     } else {
                         Map<String, Double> quotaMap = metadataImage.clientQuotas().entities().get(clientQuotaEntity).quotaMap();
-                        operationConsumer.accept(UPDATE_CLIENT_QUOTA, "Updating client quota " + clientQuotaEntity, migrationState ->
+                        operationConsumer.accept(UPDATE_CLIENT_QUOTAS, "Updating client quota " + clientQuotaEntity, migrationState ->
                             migrationClient.configClient().writeClientQuotas(clientQuotaEntity.entries(), quotaMap, Collections.emptyMap(), migrationState));
                     }
                 });
@@ -536,11 +541,11 @@ public class KRaftMigrationZkWriter {
                 ClientQuotaEntity clientQuotaEntity = new ClientQuotaEntity(Collections.singletonMap(ClientQuotaEntity.USER, userName));
                 if ((metadataImage.clientQuotas() == null) ||
                     (metadataImage.clientQuotas().entities().get(clientQuotaEntity) == null)) {
-                    operationConsumer.accept(UPDATE_CLIENT_QUOTA, "Updating scram credentials for " + clientQuotaEntity, migrationState ->
+                    operationConsumer.accept(UPDATE_CLIENT_QUOTAS, "Updating scram credentials for " + clientQuotaEntity, migrationState ->
                         migrationClient.configClient().writeClientQuotas(clientQuotaEntity.entries(), Collections.emptyMap(), userScramMap, migrationState));
                 } else {
                     Map<String, Double> quotaMap = metadataImage.clientQuotas().entities().get(clientQuotaEntity).quotaMap();
-                    operationConsumer.accept(UPDATE_CLIENT_QUOTA, "Updating client quota for " + clientQuotaEntity, migrationState ->
+                    operationConsumer.accept(UPDATE_CLIENT_QUOTAS, "Updating client quota for " + clientQuotaEntity, migrationState ->
                         migrationClient.configClient().writeClientQuotas(clientQuotaEntity.entries(), quotaMap, userScramMap, migrationState));
                 }
             });
@@ -585,19 +590,19 @@ public class KRaftMigrationZkWriter {
         newResources.forEach(resourcePattern -> {
             Set<AccessControlEntry> accessControlEntries = allAclsInSnapshot.get(resourcePattern);
             String name = "Writing " + accessControlEntries.size() + " for resource " + resourcePattern;
-            operationConsumer.accept(UPDATE_ACL, name, migrationState ->
+            operationConsumer.accept(UPDATE_ACLS, name, migrationState ->
                 migrationClient.aclClient().writeResourceAcls(resourcePattern, accessControlEntries, migrationState));
         });
 
         resourcesToDelete.forEach(deletedResource -> {
             String name = "Deleting resource " + deletedResource + " which has no ACLs in snapshot";
-            operationConsumer.accept(DELETE_ACL, name, migrationState ->
+            operationConsumer.accept(DELETE_ACLS, name, migrationState ->
                 migrationClient.aclClient().deleteResource(deletedResource, migrationState));
         });
 
         changedResources.forEach((resourcePattern, accessControlEntries) -> {
             String name = "Writing " + accessControlEntries.size() + " for resource " + resourcePattern;
-            operationConsumer.accept(UPDATE_ACL, name, migrationState ->
+            operationConsumer.accept(UPDATE_ACLS, name, migrationState ->
                 migrationClient.aclClient().writeResourceAcls(resourcePattern, accessControlEntries, migrationState));
         });
     }
@@ -631,13 +636,13 @@ public class KRaftMigrationZkWriter {
 
         resourcesWithDeletedAcls.forEach(deletedResource -> {
             String name = "Deleting resource " + deletedResource + " which has no more ACLs";
-            operationConsumer.accept(DELETE_ACL, name, migrationState ->
+            operationConsumer.accept(DELETE_ACLS, name, migrationState ->
                 migrationClient.aclClient().deleteResource(deletedResource, migrationState));
         });
 
         aclsToWrite.forEach((resourcePattern, accessControlEntries) -> {
             String name = "Writing " + accessControlEntries.size() + " for resource " + resourcePattern;
-            operationConsumer.accept(UPDATE_ACL, name, migrationState ->
+            operationConsumer.accept(UPDATE_ACLS, name, migrationState ->
                 migrationClient.aclClient().writeResourceAcls(resourcePattern, accessControlEntries, migrationState));
         });
     }
