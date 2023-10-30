@@ -310,13 +310,15 @@ private[group] class GroupMetadata(val groupId: String, initialState: GroupState
   }
 
   /**
-    * [For static members only]: Replace the old member id with the new one,
+    * [For static members only]: Replace the old member id, clientId, clientHost with the new one,
     * keep everything else unchanged and return the updated member.
     */
   def replaceStaticMember(
     groupInstanceId: String,
     oldMemberId: String,
-    newMemberId: String
+    newMemberId: String,
+    clientId: String,
+    clientHost: String
   ): MemberMetadata = {
     val memberMetadata = members.remove(oldMemberId)
       .getOrElse(throw new IllegalArgumentException(s"Cannot replace non-existing member id $oldMemberId"))
@@ -326,6 +328,8 @@ private[group] class GroupMetadata(val groupId: String, initialState: GroupState
     maybeInvokeSyncCallback(memberMetadata, SyncGroupResult(Errors.FENCED_INSTANCE_ID))
 
     memberMetadata.memberId = newMemberId
+    memberMetadata.clientId = clientId
+    memberMetadata.clientHost = clientHost
     members.put(newMemberId, memberMetadata)
 
     if (isLeader(oldMemberId)) {
