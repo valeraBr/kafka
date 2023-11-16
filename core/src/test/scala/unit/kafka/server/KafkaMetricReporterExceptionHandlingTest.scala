@@ -14,12 +14,11 @@
 
 package kafka.server
 
-import java.net.Socket
 import java.util.{Collections, Properties}
 
 import kafka.utils.TestUtils
 import org.apache.kafka.common.config.internals.QuotaConfigs
-import org.apache.kafka.common.network.ListenerName
+import org.apache.kafka.common.network.{ListenerName, NetworkContext}
 import org.apache.kafka.common.requests.{ListGroupsRequest, ListGroupsResponse}
 import org.apache.kafka.common.metrics.MetricsReporter
 import org.apache.kafka.common.metrics.KafkaMetric
@@ -64,7 +63,7 @@ class KafkaMetricReporterExceptionHandlingTest extends BaseRequestTest {
   @Test
   def testBothReportersAreInvoked(): Unit = {
     val port = anySocketServer.boundPort(ListenerName.forSecurityProtocol(SecurityProtocol.PLAINTEXT))
-    val socket = new Socket("localhost", port)
+    val socket = NetworkContext.factory.createSocket("localhost", port)
     socket.setSoTimeout(10000)
 
     try {
