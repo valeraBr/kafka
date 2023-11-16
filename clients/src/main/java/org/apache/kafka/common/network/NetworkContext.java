@@ -16,6 +16,8 @@
  */
 package org.apache.kafka.common.network;
 
+import org.apache.kafka.common.utils.Utils;
+
 import javax.net.ServerSocketFactory;
 import javax.net.SocketFactory;
 import java.nio.channels.spi.SelectorProvider;
@@ -28,7 +30,7 @@ public class NetworkContext {
     private static final SelectorProvider SELECTOR_PROVIDER_DEFAULT = SelectorProvider.provider();
     private static final SocketFactory SOCKET_FACTORY_DEFAULT = SocketFactory.getDefault();
     private static final ServerSocketFactory SERVER_SOCKET_FACTORY_DEFAULT = ServerSocketFactory.getDefault();
-    private static final ReentrantLock lock = new ReentrantLock();
+    private static final ReentrantLock LOCK = new ReentrantLock();
     private static volatile SelectorProvider selectorProvider = SELECTOR_PROVIDER_DEFAULT;
     private static volatile SocketFactory socketFactory = SOCKET_FACTORY_DEFAULT;
     private static volatile ServerSocketFactory serverSocketFactory = SERVER_SOCKET_FACTORY_DEFAULT;
@@ -56,8 +58,8 @@ public class NetworkContext {
      * @param serverFactory A provider for server-side TCP sockets
      * @return An AutoClosable that when closed, restores the default factories. Closing is idempotent.
      */
-    public AutoCloseable install(SelectorProvider provider, SocketFactory factory, ServerSocketFactory serverFactory) {
-        boolean active = lock.tryLock();
+    public static Utils.UncheckedCloseable install(SelectorProvider provider, SocketFactory factory, ServerSocketFactory serverFactory) {
+        boolean active = LOCK.tryLock();
         if (active) {
             if (provider != null) {
                 selectorProvider = provider;
@@ -77,7 +79,7 @@ public class NetworkContext {
                 selectorProvider = SELECTOR_PROVIDER_DEFAULT;
                 socketFactory = SOCKET_FACTORY_DEFAULT;
                 serverSocketFactory = SERVER_SOCKET_FACTORY_DEFAULT;
-                lock.unlock();
+                LOCK.unlock();
             }
         };
     }
