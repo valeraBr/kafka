@@ -1313,6 +1313,9 @@ private[group] class GroupCoordinator(
     reason: String,
     supportSkippingAssignment: Boolean
   ): Unit = {
+    val oldStaticMember = group.get(oldMemberId)
+    val oldClientId = oldStaticMember.clientId
+    val oldClientHost = oldStaticMember.clientHost
     val currentLeader = group.leaderOrNull
     val member = group.replaceStaticMember(groupInstanceId, oldMemberId, newMemberId, clientId, clientHost)
     // Heartbeat of old member id will expire without effect since the group no longer contains that member id.
@@ -1339,7 +1342,7 @@ private[group] class GroupCoordinator(
 
               // Failed to persist member.id of the given static member, revert the update of the static member in the group.
               group.updateMember(knownStaticMember, oldProtocols, oldRebalanceTimeoutMs, oldSessionTimeoutMs, null)
-              val oldMember = group.replaceStaticMember(groupInstanceId, newMemberId, oldMemberId, clientId, clientHost)
+              val oldMember = group.replaceStaticMember(groupInstanceId, newMemberId, oldMemberId, oldClientId, oldClientHost)
               completeAndScheduleNextHeartbeatExpiration(group, oldMember)
               responseCallback(JoinGroupResult(
                 List.empty,
