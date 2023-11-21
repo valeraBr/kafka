@@ -3787,9 +3787,9 @@ class GroupCoordinatorTest {
   @Test
   def testUpdateStaticMemberButStoreGroupFailed(): Unit = {
     val rebalanceResult = staticMembersJoinAndRebalance(leaderInstanceId, followerInstanceId, DefaultSessionTimeout, DefaultRebalanceTimeout, "oldClientId", "oldClientHost")
-    val oldGroup = getGroup(groupId)
-    val oldMemberId = oldGroup.currentStaticMemberId(followerInstanceId)
-    val oldMember = oldGroup.get(oldMemberId.get)
+    val group = getGroup(groupId)
+    val oldMemberId = group.currentStaticMemberId(followerInstanceId)
+    val oldMember = group.get(oldMemberId.get)
     val oldClientId = oldMember.clientId
     val oldClientHost = oldMember.clientHost
 
@@ -3803,10 +3803,8 @@ class GroupCoordinatorTest {
       Stable,
       Some(protocolType))
 
-    val newGroup = getGroup(groupId)
-    val newMemberId = newGroup.currentStaticMemberId(followerInstanceId)
-    val newMember = newGroup.get(newMemberId.get)
-
+    val newMemberId = group.currentStaticMemberId(followerInstanceId)
+    val newMember = group.get(newMemberId.get)
     assertEquals(oldClientId, newMember.clientId)
     assertEquals(oldClientHost, newMember.clientHost)
   }
