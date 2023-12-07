@@ -237,7 +237,17 @@ public class StandaloneHerder extends AbstractHerder {
                 }
 
                 requestExecutorService.submit(() -> {
-                    updateConnectorTasks(connName);
+                    try {
+                        updateConnectorTasks(connName);
+                    } catch (Throwable t) {
+                        String errorMsg = "Failed to update tasks after connector startup";
+                        ConnectException e = new ConnectException(errorMsg, t);
+                        log.error(errorMsg, t);
+                        // Update the connector's status
+                        onFailure(connName, e);
+                        callback.onCompletion(e, null);
+                        return;
+                    }
                     callback.onCompletion(null, new Created<>(created, createConnectorInfo(connName)));
                 });
             });
@@ -315,7 +325,17 @@ public class StandaloneHerder extends AbstractHerder {
 
         startConnector(connName, (error, targetState) -> {
             if (targetState == TargetState.STARTED) {
-                requestTaskReconfiguration(connName);
+                try {
+                    updateConnectorTasks(connName);
+                } catch (Throwable t) {
+                    String errorMsg = "Failed to update tasks after connector restart";
+                    ConnectException e = new ConnectException(errorMsg, t);
+                    log.error(errorMsg, t);
+                    // Update the connector's status
+                    onFailure(connName, e);
+                    cb.onCompletion(e, null);
+                    return;
+                }
             }
             cb.onCompletion(error, null);
         });
@@ -546,7 +566,16 @@ public class StandaloneHerder extends AbstractHerder {
                     }
 
                     if (newState == TargetState.STARTED) {
-                        requestExecutorService.submit(() -> updateConnectorTasks(connector));
+                        requestExecutorService.submit(() -> {
+                            try {
+                                updateConnectorTasks(connector);
+                            } catch (Throwable t) {
+                                String errorMsg = "Failed to update tasks after connector startup";
+                                log.error(errorMsg, t);
+                                // Update the connector's status
+                                onFailure(connector, new ConnectException(errorMsg, t));
+                            }
+                        });
                     }
                 });
             }
