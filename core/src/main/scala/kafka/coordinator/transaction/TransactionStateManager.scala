@@ -392,6 +392,12 @@ class TransactionStateManager(brokerId: Int,
     }
   }
 
+  private[transaction] def txnStateLoaded(partitionId: Int): Boolean = {
+    inReadLock(stateLock) {
+      transactionMetadataCache.contains(partitionId)
+    }
+  }
+
   /**
    * Validate the given transaction timeout value
    */
@@ -514,8 +520,14 @@ class TransactionStateManager(brokerId: Int,
    * When this broker becomes a leader for a transaction log partition, load this partition and populate the transaction
    * metadata cache with the transactional ids. This operation must be resilient to any partial state left off from
    * the previous loading / unloading operation.
+   *
+   * If the state is already loaded (leader epoch bumps, but we have the same leader), just update the epoch in the
+   * metadata cache and for all the pending markers.
    */
-  def loadTransactionsForTxnTopicPartition(partitionId: Int, coordinatorEpoch: Int, sendTxnMarkers: SendTxnMarkersCallback): Unit = {
+  def maybeLoadTransactionsAndBumpEpochForTxnTopicPartition(partitionId: Int,
+                                                            coordinatorEpoch: Int,
+                                                            sendTxnMarkers: SendTxnMarkersCallback,
+                                                            transactionStateLoaded: Boolean): Unit = {
     val topicPartition = new TopicPartition(Topic.TRANSACTION_STATE_TOPIC_NAME, partitionId)
     val partitionAndLeaderEpoch = TransactionPartitionAndLeaderEpoch(partitionId, coordinatorEpoch)
 
@@ -524,23 +536,35 @@ class TransactionStateManager(brokerId: Int,
     }
 
     def loadTransactions(startTimeMs: java.lang.Long): Unit = {
-      val schedulerTimeMs = time.milliseconds() - startTimeMs
-      info(s"Loading transaction metadata from $topicPartition at epoch $coordinatorEpoch")
-      validateTransactionTopicPartitionCountIsStable()
+      val maybeLoadedTransactions =
+        if (!transactionStateLoaded) {
+          val schedulerTimeMs = time.milliseconds() - startTimeMs
+          info(s"Loading transaction metadata from $topicPartition at epoch $coordinatorEpoch")
+          validateTransactionTopicPartitionCountIsStable()
 
-      val loadedTransactions = loadTransactionMetadata(topicPartition, coordinatorEpoch)
-      val endTimeMs = time.milliseconds()
-      val totalLoadingTimeMs = endTimeMs - startTimeMs
-      partitionLoadSensor.record(totalLoadingTimeMs.toDouble, endTimeMs, false)
-      info(s"Finished loading ${loadedTransactions.size} transaction metadata from $topicPartition in " +
-        s"$totalLoadingTimeMs milliseconds, of which $schedulerTimeMs milliseconds was spent in the scheduler.")
+          val loadedTransactions = loadTransactionMetadata(topicPartition, coordinatorEpoch)
+          val endTimeMs = time.milliseconds()
+          val totalLoadingTimeMs = endTimeMs - startTimeMs
+          partitionLoadSensor.record(totalLoadingTimeMs.toDouble, endTimeMs, false)
+          info(s"Finished loading ${loadedTransactions.size} transaction metadata from $topicPartition in " +
+            s"$totalLoadingTimeMs milliseconds, of which $schedulerTimeMs milliseconds was spent in the scheduler.")
+          Some(loadedTransactions)
+        } else {
+          None
+        }
 
       inWriteLock(stateLock) {
         if (loadingPartitions.contains(partitionAndLeaderEpoch)) {
-          addLoadedTransactionsToCache(topicPartition.partition, coordinatorEpoch, loadedTransactions)
+          val transactionsToUpdate = maybeLoadedTransactions match {
+            case Some(loadedTransactions) =>
+              loadedTransactions
+            case None =>
+              transactionMetadataCache(topicPartition.partition).metadataPerTransactionalId
+          }
+          addLoadedTransactionsToCache(topicPartition.partition, coordinatorEpoch, transactionsToUpdate)
 
           val transactionsPendingForCompletion = new mutable.ListBuffer[TransactionalIdCoordinatorEpochAndTransitMetadata]
-          loadedTransactions.foreach {
+          transactionsToUpdate.foreach {
             case (transactionalId, txnMetadata) =>
               txnMetadata.inLock {
                 // if state is PrepareCommit or PrepareAbort we need to complete the transaction
@@ -569,7 +593,8 @@ class TransactionStateManager(brokerId: Int,
         }
       }
 
-      info(s"Completed loading transaction metadata from $topicPartition for coordinator epoch $coordinatorEpoch")
+      val maybeLoadOperation = if (transactionStateLoaded) "" else "loading transaction metadata and"
+      info(s"Completed $maybeLoadOperation bumping epoch for $topicPartition and coordinator epoch $coordinatorEpoch")
     }
 
     val scheduleStartMs = time.milliseconds()
