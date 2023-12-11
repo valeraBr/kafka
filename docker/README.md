@@ -96,7 +96,7 @@ Using the image in a docker container
 -------------------------------------
 - The image uses the kafka downloaded from provided kafka url
 - The image can be run in a container in default mode by running
-`docker run -p 9092:9092 <image-name:tag>`
+  `docker run -p 9092:9092 <image-name:tag>`
 - Default configs run kafka in kraft mode with plaintext listners on 9092 port.
 - Once user provided config properties are provided default configs will get replaced.
 - User can provide kafka configs following two ways:-

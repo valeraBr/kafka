@@ -79,6 +79,6 @@ if __name__ == '__main__':
             build_jvm(args.image, args.tag, args.kafka_url)
         else:
             raise ValueError("--kafka-url is a required argument for jvm image")
-    
+
     if args.image_type == "jvm" and (args.test_only or not (args.build_only or args.test_only)):
         run_jvm_tests(args.image, args.tag, args.kafka_url)

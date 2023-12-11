@@ -29,7 +29,7 @@ then
       # Unset in case env variable is set with empty value
       unset KAFKA_ADVERTISED_LISTENERS
     fi
-  fi 
+  fi
 fi
 
 # By default, LISTENERS is derived from ADVERTISED_LISTENERS by replacing
