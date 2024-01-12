@@ -207,7 +207,9 @@ if (repo != null) {
         'streams/streams-scala/logs/*',
         'licenses/*',
         '**/generated/**',
-        'clients/src/test/resources/serializedData/*'
+        'clients/src/test/resources/serializedData/*',
+        'docker/test/fixtures/secrets/*',
+        'docker/examples/fixtures/secrets/*'
     ])
   }
 } else {
@@ -300,7 +302,7 @@ subprojects {
             from components.java
           } else {
             apply plugin: 'com.github.johnrengelman.shadow'
-            project.shadow.component(mavenJava)
+            artifact shadowJar
           }
 
           afterEvaluate {
@@ -417,7 +419,6 @@ subprojects {
     testsToExclude.addAll([
       // connect tests
       "**/KafkaConfigBackingStoreTest.*",
-      "**/StandaloneHerderTest.*",
       "**/WorkerSinkTaskTest.*"
     ])
   }
@@ -845,6 +846,63 @@ tasks.create(name: "jarConnect", dependsOn: connectPkgs.collect { it + ":jar" })
 
 tasks.create(name: "testConnect", dependsOn: connectPkgs.collect { it + ":test" }) {}
 
+project(':server') {
+  archivesBaseName = "kafka-server"
+
+  dependencies {
+    implementation project(':clients')
+    implementation project(':server-common')
+    implementation libs.metrics
+
+    implementation libs.slf4jApi
+
+    compileOnly libs.log4j
+
+    testImplementation project(':clients').sourceSets.test.output
+
+    testImplementation libs.mockitoCore
+    testImplementation libs.junitJupiter
+    testImplementation libs.slf4jlog4j
+  }
+
+  task createVersionFile() {
+    def receiptFile = file("$buildDir/kafka/$buildVersionFileName")
+    inputs.property "commitId", commitId
+    inputs.property "version", version
+    outputs.file receiptFile
+
+    doLast {
+      def data = [
+        commitId: commitId,
+        version: version,
+      ]
+
+      receiptFile.parentFile.mkdirs()
+      def content = data.entrySet().collect { "$it.key=$it.value" }.sort().join("\n")
+      receiptFile.setText(content, "ISO-8859-1")
+    }
+  }
+
+  jar {
+    dependsOn createVersionFile
+    from("$buildDir") {
+      include "kafka/$buildVersionFileName"
+    }
+  }
+
+  clean.doFirst {
+    delete "$buildDir/kafka/"
+  }
+
+  checkstyle {
+    configProperties = checkstyleConfigProperties("import-control-server.xml")
+  }
+
+  javadoc {
+    enabled = false
+  }
+}
+
 project(':core') {
   apply plugin: 'scala'
 
@@ -876,7 +934,7 @@ project(':core') {
     implementation project(':tools:tools-api')
     implementation project(':raft')
     implementation project(':storage')
-
+    implementation project(':server')
 
     implementation libs.argparse4j
     implementation libs.commonsValidator
@@ -915,6 +973,7 @@ project(':core') {
     testImplementation project(':raft').sourceSets.test.output
     testImplementation project(':server-common').sourceSets.test.output
     testImplementation project(':storage:storage-api').sourceSets.test.output
+    testImplementation project(':server').sourceSets.test.output
     testImplementation libs.bcpkix
     testImplementation libs.mockitoCore
     testImplementation(libs.apacheda) {
@@ -933,9 +992,6 @@ project(':core') {
     testImplementation libs.apachedsJdbmPartition
     testImplementation libs.junitJupiter
     testImplementation libs.slf4jlog4j
-    testImplementation(libs.jfreechart) {
-      exclude group: 'junit', module: 'junit'
-    }
     testImplementation libs.caffeine
     
     generator project(':generator')
@@ -1260,6 +1316,7 @@ project(':group-coordinator') {
     implementation project(':server-common')
     implementation project(':clients')
     implementation project(':metadata')
+    implementation project(':storage')
     implementation libs.slf4jApi
     implementation libs.metrics
 
@@ -1369,6 +1426,7 @@ project(':clients') {
     testImplementation libs.junitJupiter
     testImplementation libs.log4j
     testImplementation libs.mockitoCore
+    testImplementation libs.mockitoJunitJupiter // supports MockitoExtension
 
     testRuntimeOnly libs.slf4jlog4j
     testRuntimeOnly libs.jacksonDatabind
@@ -1527,6 +1585,7 @@ project(':raft') {
     implementation libs.jacksonDatabind
 
     testImplementation project(':server-common')
+    testImplementation project(':server-common').sourceSets.test.output
     testImplementation project(':clients')
     testImplementation project(':clients').sourceSets.test.output
     testImplementation libs.junitJupiter
@@ -1646,19 +1705,6 @@ project(':server-common') {
     }
   }
 
-  sourceSets {
-    main {
-      java {
-        srcDirs = ["src/main/java"]
-      }
-    }
-    test {
-      java {
-        srcDirs = ["src/test/java"]
-      }
-    }
-  }
-
   jar {
     dependsOn createVersionFile
     from("$buildDir") {
@@ -1672,6 +1718,10 @@ project(':server-common') {
 
   checkstyle {
     configProperties = checkstyleConfigProperties("import-control-server-common.xml")
+  }
+
+  javadoc {
+    enabled = false
   }
 }
 
@@ -1950,6 +2000,9 @@ project(':tools') {
     testImplementation libs.mockitoCore
     testImplementation libs.mockitoJunitJupiter // supports MockitoExtension
     testImplementation libs.bcpkix // required by the clients test module, but we have to specify it explicitly as gradle does not include the transitive test dependency automatically
+    testImplementation(libs.jfreechart) {
+      exclude group: 'junit', module: 'junit'
+    }
     testRuntimeOnly libs.slf4jlog4j
   }
 
@@ -2044,6 +2097,11 @@ project(':shell') {
     implementation libs.jacksonJaxrsJsonProvider
 
     testImplementation project(':clients')
+    testImplementation project(':clients').sourceSets.test.output
+    testImplementation project(':core')
+    testImplementation project(':core').sourceSets.test.output
+    testImplementation project(':server-common')
+    testImplementation project(':server-common').sourceSets.test.output
     testImplementation libs.junitJupiter
 
     testRuntimeOnly libs.slf4jlog4j
@@ -2093,6 +2151,7 @@ project(':streams') {
     testImplementation project(':core')
     testImplementation project(':tools')
     testImplementation project(':core').sourceSets.test.output
+    testImplementation project(':server-common')
     testImplementation project(':server-common').sourceSets.test.output
     testImplementation libs.log4j
     testImplementation libs.junitJupiter
@@ -2651,6 +2710,7 @@ project(':jmh-benchmarks') {
     implementation project(':core')
     implementation project(':connect:api')
     implementation project(':connect:transforms')
+    implementation project(':connect:json')
     implementation project(':clients').sourceSets.test.output
     implementation project(':core').sourceSets.test.output
     implementation project(':server-common').sourceSets.test.output
@@ -2797,6 +2857,7 @@ project(':connect:json') {
 
     api libs.jacksonDatabind
     api libs.jacksonJDK8Datatypes
+    api libs.jacksonAfterburner
 
     implementation libs.slf4jApi
 
