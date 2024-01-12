@@ -54,6 +54,7 @@ import java.util.Queue;
 import java.util.Set;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Supplier;
 
 
@@ -107,6 +108,8 @@ public class KafkaBasedLog<K, V> {
     private boolean stopRequested;
     private final Queue<Callback<Void>> readLogEndOffsetCallbacks;
     private final java.util.function.Consumer<TopicAdmin> initializer;
+
+    private final AtomicReference<Throwable> workThreadFailedWithError;
 
     /**
      * Create a new KafkaBasedLog object. This does not start reading the log and writing is not permitted until
@@ -180,6 +183,7 @@ public class KafkaBasedLog<K, V> {
         // consumer are at least as high as the (possibly-part-of-a-transaction) end offsets of the topic.
         this.requireAdminForOffsets = IsolationLevel.READ_COMMITTED.name().toLowerCase(Locale.ROOT)
                 .equals(consumerConfigs.get(ConsumerConfig.ISOLATION_LEVEL_CONFIG));
+        this.workThreadFailedWithError = new AtomicReference<>();
     }
 
     /**
@@ -329,9 +333,17 @@ public class KafkaBasedLog<K, V> {
      *
      * @param callback the callback to invoke once the end of the log has been reached.
      */
-    public void readToEnd(Callback<Void> callback) {
+    public void readToEnd(Callback<Void> callback)  {
         log.trace("Starting read to end log for topic {}", topic);
         flush();
+        // Before submitting this log read request, we will check if the underneath work thread
+        // responsible for processing the requests is alive or not. In case it isn't, we will
+        // not enqueue such requests and mark it as completed immediately with the error with
+        // which the work thread failed.
+        if (workThreadFailedWithError.get() != null) {
+            callback.onCompletion(workThreadFailedWithError.get(), null);
+            return;
+        }
         synchronized (this) {
             readLogEndOffsetCallbacks.add(callback);
         }
@@ -590,6 +602,15 @@ public class KafkaBasedLog<K, V> {
                 }
             } catch (Throwable t) {
                 log.error("Unexpected exception in {}", this, t);
+                workThreadFailedWithError.compareAndSet(null, t);
+                log.trace("Marking all topic read requests as failed");
+                // The thread responsible for processing the log read operations is dead now. However, there could
+                // be some requests enqueued and the requesters might be blocked if there's no
+                // timeout set while waiting. We will go over all such requests and mark them as completed with error.
+                while (!readLogEndOffsetCallbacks.isEmpty()) {
+                    Callback<Void> cb = readLogEndOffsetCallbacks.poll();
+                    cb.onCompletion(t, null);
+                }
             }
         }
     }
