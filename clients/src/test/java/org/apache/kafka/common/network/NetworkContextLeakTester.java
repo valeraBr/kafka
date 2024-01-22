@@ -18,6 +18,7 @@ package org.apache.kafka.common.network;
 
 import org.apache.kafka.common.utils.LeakTester;
 import org.apache.kafka.common.utils.PredicateLeakTester;
+import org.apache.kafka.common.utils.Utils;
 import org.junit.jupiter.api.extension.ExtensionContext;
 
 import javax.net.ServerSocketFactory;
@@ -38,14 +39,15 @@ import java.nio.channels.spi.AbstractSelector;
 import java.nio.channels.spi.SelectorProvider;
 
 /**
- * A LeakTester which attaches to the static {@link NetworkContext} to automatically register sockets created by
- * Kafka clients and servers for leak testing. Only one instance of this object may be open concurrently, so tests
+ * A {@link LeakTester} which attaches to the static {@link NetworkContext} to automatically register sockets created
+ * by Kafka clients and servers for leak testing. Only one instance of this object may be open concurrently, so tests
  * running concurrently should share one instance.
  */
 public class NetworkContextLeakTester implements LeakTester, ExtensionContext.Store.CloseableResource {
 
-    private final AutoCloseable context;
     private final LeakTester tester;
+    private final Utils.UncheckedCloseable context;
+
     public NetworkContextLeakTester() {
         RecordingSelectorProvider selectorProvider = new RecordingSelectorProvider();
         RecordingSocketFactory socketFactory = new RecordingSocketFactory();
@@ -59,7 +61,7 @@ public class NetworkContextLeakTester implements LeakTester, ExtensionContext.St
                 socketFactory.socketTester,
                 serverSocketFactory.serverSocketTester
         );
-        this.context = NetworkContext.install(selectorProvider, socketFactory, serverSocketFactory);
+        context = NetworkContext.install(selectorProvider, socketFactory, serverSocketFactory);
     }
 
     public LeakTest start() {
@@ -67,13 +69,12 @@ public class NetworkContextLeakTester implements LeakTester, ExtensionContext.St
     }
 
     @Override
-    public void close() throws Exception {
-        if (context != null) {
-            context.close();
-        }
+    public void close() {
+        context.close();
     }
 
     private static class RecordingSelectorProvider extends SelectorProvider {
+
         private final SelectorProvider selectorProvider;
         private final PredicateLeakTester<DatagramChannel> datagramTester;
         private final PredicateLeakTester<Pipe> pipeTester;
@@ -123,9 +124,8 @@ public class NetworkContextLeakTester implements LeakTester, ExtensionContext.St
 
     private static class RecordingSocketFactory extends SocketFactory {
 
-        private final PredicateLeakTester<Socket> socketTester;
-
         private final SocketFactory factory;
+        private final PredicateLeakTester<Socket> socketTester;
 
         private RecordingSocketFactory() {
             this.factory = SocketFactory.getDefault();
@@ -160,8 +160,8 @@ public class NetworkContextLeakTester implements LeakTester, ExtensionContext.St
 
     private static class RecordingServerSocketFactory extends ServerSocketFactory {
 
-        private final PredicateLeakTester<ServerSocket> serverSocketTester;
         private final ServerSocketFactory factory;
+        private final PredicateLeakTester<ServerSocket> serverSocketTester;
 
         private RecordingServerSocketFactory() {
             factory = ServerSocketFactory.getDefault();

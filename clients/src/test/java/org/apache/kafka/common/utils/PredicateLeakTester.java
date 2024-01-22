@@ -19,6 +19,7 @@ package org.apache.kafka.common.utils;
 import java.util.HashSet;
 import java.util.Iterator;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
@@ -43,18 +44,19 @@ public class PredicateLeakTester<T> implements LeakTester {
      * @param clazz The superclass of objects tracked by this tester
      */
     public PredicateLeakTester(Predicate<T> isOpen, Class<T> clazz) {
-        this.isOpen = isOpen;
-        this.clazz = clazz;
+        this.isOpen = Objects.requireNonNull(isOpen, "predicate must be non-null");
+        this.clazz = Objects.requireNonNull(clazz, "class must be non-null");
     }
 
     /**
      * Register a resource to be tracked
      * <p>This method captures a stacktrace when a resource is registered, so this method should be called near to
      * where the resource is opened or created. This is included in the stack trace thrown from failed leak assertions.
-     * @param obj The resource being tracked
+     * @param obj The resource being tracked, non-null
      * @return The passed-in object, for method-chaining
      */
     public T open(T obj) {
+        Objects.requireNonNull(obj, "resource must be non-null");
         try {
             throw new Exception("Opened " + obj.getClass().getName());
         } catch (Exception e) {

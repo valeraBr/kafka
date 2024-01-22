@@ -72,7 +72,7 @@ public interface LeakTester {
      * concurrently. If one or more of the testers discovers a leak, their exceptions are suppressed and a new exception
      * is thrown to summarize all failures.
      * @param testers A group of LeakTester instances which should be run concurrently
-     * @return A combined leak test which runs tests for the passed-in testers concurrently.
+     * @return A combined leak test which runs tests for the passed-in testers concurrently, non-null.
      */
     static LeakTester combine(LeakTester... testers) {
         return () -> {
