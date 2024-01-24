@@ -52,7 +52,9 @@ class ReplicaFetcherManager(brokerConfig: KafkaConfig,
 
   def shutdown(): Unit = {
     info("shutting down")
+    System.err.println("shutting down")
     closeAllFetchers()
     info("shutdown completed")
+    System.err.println("shutting completed")
   }
 }

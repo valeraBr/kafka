@@ -134,6 +134,7 @@ abstract class AbstractFetcherManager[T <: AbstractFetcherThread](val name: Stri
       def addAndStartFetcherThread(brokerAndFetcherId: BrokerAndFetcherId,
                                    brokerIdAndFetcherId: BrokerIdAndFetcherId): T = {
         val fetcherThread = createFetcherThread(brokerAndFetcherId.fetcherId, brokerAndFetcherId.broker)
+        System.err.println("creating:" + brokerIdAndFetcherId + ";;" + fetcherThread)
         fetcherThreadMap.put(brokerIdAndFetcherId, fetcherThread)
         fetcherThread.start()
         fetcherThread
@@ -216,6 +217,7 @@ abstract class AbstractFetcherManager[T <: AbstractFetcherThread](val name: Stri
 
   def closeAllFetchers(): Unit = {
     lock synchronized {
+      System.err.println(fetcherThreadMap)
       for ((_, fetcher) <- fetcherThreadMap) {
         fetcher.initiateShutdown()
       }

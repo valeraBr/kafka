@@ -47,7 +47,7 @@ import org.apache.kafka.common.record._
 import org.apache.kafka.common.replica.PartitionView.DefaultPartitionView
 import org.apache.kafka.common.replica.ReplicaView.DefaultReplicaView
 import org.apache.kafka.common.replica._
-import org.apache.kafka.common.requests.FetchRequest.PartitionData
+import org.apache.kafka.common.requests.FetchRequest.{PartitionData}
 import org.apache.kafka.common.requests.ProduceResponse.PartitionResponse
 import org.apache.kafka.common.requests._
 import org.apache.kafka.common.utils.Time
@@ -1328,6 +1328,7 @@ class ReplicaManager(val config: KafkaConfig,
 
             val initialFetchState = InitialFetchState(topicId, BrokerEndPoint(config.brokerId, "localhost", -1),
               partition.getLeaderEpoch, futureLog.highWatermark)
+            System.err.println("alter dir:" + localBrokerId + ";;" + topicPartition)
             replicaAlterLogDirsManager.addFetcherForPartitions(Map(topicPartition -> initialFetchState))
           }
 
@@ -2251,8 +2252,10 @@ class ReplicaManager(val config: KafkaConfig,
       }
     }
 
-    if (futureReplicasAndInitialOffset.nonEmpty)
+    if (futureReplicasAndInitialOffset.nonEmpty) {
+      System.err.println("add log dir:" + localBrokerId + ";;" + futureReplicasAndInitialOffset)
       replicaAlterLogDirsManager.addFetcherForPartitions(futureReplicasAndInitialOffset)
+    }
   }
 
   /*
@@ -2433,6 +2436,7 @@ class ReplicaManager(val config: KafkaConfig,
           partition.topicPartition -> InitialFetchState(topicIds(partition.topic), leader, partition.getLeaderEpoch, fetchOffset)
         }.toMap
 
+        System.err.println("makeFollowers:" + localBrokerId + ";;" + partitionsToMakeFollowerWithLeaderAndOffset)
         replicaFetcherManager.addFetcherForPartitions(partitionsToMakeFollowerWithLeaderAndOffset)
       }
     } catch {
@@ -2972,6 +2976,7 @@ class ReplicaManager(val config: KafkaConfig,
         }
       }
 
+      System.err.println("apply follower:" + localBrokerId + ";;" + partitionAndOffsets)
       replicaFetcherManager.addFetcherForPartitions(partitionAndOffsets)
       stateChangeLogger.info(s"Started fetchers as part of become-follower for ${partitionsToStartFetching.size} partitions")
 
