@@ -97,14 +97,18 @@ public abstract class ShutdownableThread extends Thread {
      * After calling initiateShutdown(), use this API to wait until the shutdown is complete.
      */
     public void awaitShutdown() throws InterruptedException {
-        System.err.println("Shutdown down:" + getName());
+        if (getName().contains("ReplicaFetcherThread")) {
+            System.err.print("Shutdown:" + getName());
+        }
         if (!isShutdownInitiated())
             throw new IllegalStateException("initiateShutdown() was not called before awaitShutdown()");
         else {
             if (isStarted)
                 shutdownComplete.await();
             log.info("Shutdown completed");
-            System.err.println("Shutdown completed:" + getName());
+            if (getName().contains("ReplicaFetcherThread")) {
+                System.err.print(" completed:" + getName());
+            }
         }
     }
 

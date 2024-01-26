@@ -217,7 +217,9 @@ abstract class AbstractFetcherManager[T <: AbstractFetcherThread](val name: Stri
 
   def closeAllFetchers(): Unit = {
     lock synchronized {
-      System.err.println(fetcherThreadMap)
+      if (!fetcherThreadMap.isEmpty) {
+        System.err.println("closing fetchers:" + fetcherThreadMap)
+      }
       for ((_, fetcher) <- fetcherThreadMap) {
         fetcher.initiateShutdown()
       }
