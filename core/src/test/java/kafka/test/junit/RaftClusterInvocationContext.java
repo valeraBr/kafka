@@ -21,6 +21,7 @@ import kafka.network.SocketServer;
 import kafka.server.BrokerFeatures;
 import kafka.server.BrokerServer;
 import kafka.server.ControllerServer;
+import kafka.server.KafkaBroker;
 import kafka.test.ClusterConfig;
 import kafka.test.ClusterInstance;
 import kafka.testkit.KafkaClusterTestKit;
@@ -154,7 +155,7 @@ public class RaftClusterInvocationContext implements TestTemplateInvocationConte
         @Override
         public Collection<SocketServer> brokerSocketServers() {
             return brokers()
-                .map(BrokerServer::socketServer)
+                .map(KafkaBroker::socketServer)
                 .collect(Collectors.toList());
         }
 
@@ -178,7 +179,7 @@ public class RaftClusterInvocationContext implements TestTemplateInvocationConte
         @Override
         public SocketServer anyBrokerSocketServer() {
             return brokers()
-                .map(BrokerServer::socketServer)
+                .map(KafkaBroker::socketServer)
                 .findFirst()
                 .orElseThrow(() -> new RuntimeException("No broker SocketServers found"));
         }
@@ -195,14 +196,14 @@ public class RaftClusterInvocationContext implements TestTemplateInvocationConte
         public Map<Integer, BrokerFeatures> brokerFeatures() {
             return brokers().collect(Collectors.toMap(
                 brokerServer -> brokerServer.config().nodeId(),
-                BrokerServer::brokerFeatures
+                KafkaBroker::brokerFeatures
             ));
         }
 
         @Override
         public String clusterId() {
             return controllers().findFirst().map(ControllerServer::clusterId).orElse(
-                brokers().findFirst().map(BrokerServer::clusterId).orElseThrow(
+                brokers().findFirst().map(KafkaBroker::clusterId).orElseThrow(
                     () -> new RuntimeException("No controllers or brokers!"))
             );
         }
@@ -299,8 +300,8 @@ public class RaftClusterInvocationContext implements TestTemplateInvocationConte
                 .orElseThrow(() -> new IllegalArgumentException("Unknown brokerId " + brokerId));
         }
 
-        public Stream<BrokerServer> brokers() {
-            return clusterReference.get().brokers().values().stream();
+        public Stream<KafkaBroker> brokers() {
+            return clusterReference.get().brokers().values().stream().map(b -> b);
         }
 
         public Stream<ControllerServer> controllers() {

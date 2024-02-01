@@ -41,13 +41,13 @@ class AllocateProducerIdsRequestTest(cluster: ClusterInstance) {
     val raftCluster = cluster.asInstanceOf[RaftClusterInstance]
     val sourceBroker = raftCluster.brokers.findFirst().get()
 
-    val controllerId = sourceBroker.raftManager.leaderAndEpoch.leaderId().getAsInt
+    val controllerId = sourceBroker.asInstanceOf[BrokerServer].raftManager.leaderAndEpoch.leaderId().getAsInt
     val controllerServer = raftCluster.controllers()
       .filter(_.config.nodeId == controllerId)
       .findFirst()
       .get()
 
-    val allocateResponse = sendAndReceiveAllocateProducerIds(sourceBroker, controllerServer)
+    val allocateResponse = sendAndReceiveAllocateProducerIds(sourceBroker.asInstanceOf[BrokerServer], controllerServer)
     assertEquals(Errors.NONE, allocateResponse.error)
     assertEquals(ProducerIdsBlock.PRODUCER_ID_BLOCK_SIZE, allocateResponse.data.producerIdLen)
     assertTrue(allocateResponse.data.producerIdStart >= 0)
@@ -58,13 +58,13 @@ class AllocateProducerIdsRequestTest(cluster: ClusterInstance) {
     val raftCluster = cluster.asInstanceOf[RaftClusterInstance]
     val sourceBroker = raftCluster.brokers.findFirst().get()
 
-    val controllerId = sourceBroker.raftManager.leaderAndEpoch.leaderId().getAsInt
+    val controllerId = sourceBroker.asInstanceOf[BrokerServer].raftManager.leaderAndEpoch.leaderId().getAsInt
     val controllerServer = raftCluster.controllers()
       .filter(_.config.nodeId != controllerId)
       .findFirst()
       .get()
 
-    val allocateResponse = sendAndReceiveAllocateProducerIds(sourceBroker, controllerServer)
+    val allocateResponse = sendAndReceiveAllocateProducerIds(sourceBroker.asInstanceOf[BrokerServer], controllerServer)
     assertEquals(Errors.NOT_CONTROLLER, Errors.forCode(allocateResponse.data.errorCode))
   }
 

@@ -62,7 +62,7 @@ class ConsumerGroupHeartbeatRequestTest(cluster: ClusterInstance) {
     // in this test because it does not use FindCoordinator API.
     TestUtils.createOffsetsTopicWithAdmin(
       admin = admin,
-      brokers = raftCluster.brokers.collect(Collectors.toList[BrokerServer]).asScala,
+      brokers = raftCluster.brokers.collect(Collectors.toList[KafkaBroker]).asScala,
       controllers = raftCluster.controllerServers().asScala.toSeq
     )
 
@@ -151,7 +151,7 @@ class ConsumerGroupHeartbeatRequestTest(cluster: ClusterInstance) {
     // in this test because it does not use FindCoordinator API.
     TestUtils.createOffsetsTopicWithAdmin(
       admin = admin,
-      brokers = raftCluster.brokers.collect(Collectors.toList[BrokerServer]).asScala,
+      brokers = raftCluster.brokers.collect(Collectors.toList[KafkaBroker]).asScala,
       controllers = raftCluster.controllerServers().asScala.toSeq
     )
 
@@ -267,7 +267,7 @@ class ConsumerGroupHeartbeatRequestTest(cluster: ClusterInstance) {
     // in this test because it does not use FindCoordinator API.
     TestUtils.createOffsetsTopicWithAdmin(
       admin = admin,
-      brokers = raftCluster.brokers.collect(Collectors.toList[BrokerServer]).asScala,
+      brokers = raftCluster.brokers.collect(Collectors.toList[KafkaBroker]).asScala,
       controllers = raftCluster.controllerServers().asScala.toSeq
     )
 
