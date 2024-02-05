@@ -24,7 +24,6 @@ import java.nio.channels.spi.SelectorProvider;
 import java.util.ConcurrentModificationException;
 import java.util.concurrent.Semaphore;
 import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.concurrent.locks.ReentrantLock;
 
 /**
  * Store and distribute static factories for {@link java.net} sockets and {@link java.nio.channels} channel instances.
