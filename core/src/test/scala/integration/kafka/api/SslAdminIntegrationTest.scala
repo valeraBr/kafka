@@ -40,8 +40,9 @@ object SslAdminIntegrationTest {
   @volatile var semaphore: Option[Semaphore] = None
   @volatile var executor: Option[ExecutorService] = None
   @volatile var lastUpdateRequestContext: Option[AuthorizableRequestContext] = None
-  val superuserCn = "super-user"
   val serverUser = "server"
+  val superuserCn = "super-user"
+  val clientCn = "client"
 
   class TestableAclAuthorizer extends AclAuthorizer {
     override def createAcls(requestContext: AuthorizableRequestContext,
@@ -86,29 +87,37 @@ object SslAdminIntegrationTest {
   class TestPrincipalBuilder extends DefaultKafkaPrincipalBuilder(null, null) {
     private val Pattern = "O=A (.*?),CN=(.*?)".r
 
-    // Use fields from DN as server principal to grant authorisation for servers and super admin client
+    // Use fields from DN as principal to grant appropriate permissions
     override def build(context: AuthenticationContext): KafkaPrincipal = {
-      val peerPrincipal = context.asInstanceOf[SslAuthenticationContext].session.getPeerPrincipal.getName
-      peerPrincipal match {
-        case Pattern(name, cn) =>
-          val principal = if ((name == "server") || (cn == superuserCn)) "server" else KafkaPrincipal.ANONYMOUS.getName
-          new KafkaPrincipal(KafkaPrincipal.USER_TYPE, principal)
-        case _ =>
-          KafkaPrincipal.ANONYMOUS
+      if (context.securityProtocol().equals(SecurityProtocol.PLAINTEXT)) {
+        KafkaPrincipal.ANONYMOUS
+      } else {
+        val peerPrincipal = context.asInstanceOf[SslAuthenticationContext].session.getPeerPrincipal.getName
+        peerPrincipal match {
+          case Pattern(name, cn) =>
+            val principal =
+              if ((name == serverUser) || (cn == superuserCn)) serverUser
+              else if (cn == clientCn) clientCn
+              else KafkaPrincipal.ANONYMOUS.getName
+            new KafkaPrincipal(KafkaPrincipal.USER_TYPE, principal)
+          case _ =>
+            KafkaPrincipal.ANONYMOUS
+        }
       }
     }
   }
 }
 
 class SslAdminIntegrationTest extends SaslSslAdminIntegrationTest {
-  override val aclAuthorizerClassName: String = classOf[SslAdminIntegrationTest.TestableAclAuthorizer].getName
+  private val adminClients = mutable.Buffer.empty[Admin]
+
+  override val zkAuthorizerClassName: String = classOf[SslAdminIntegrationTest.TestableAclAuthorizer].getName
+  override protected def securityProtocol = SecurityProtocol.SSL
+  override protected lazy val trustStoreFile = Some(TestUtils.tempFile("truststore", ".jks"))
+  override val kafkaPrincipal = new KafkaPrincipal(KafkaPrincipal.USER_TYPE, SslAdminIntegrationTest.serverUser)
 
   this.serverConfig.setProperty(BrokerSecurityConfigs.SSL_CLIENT_AUTH_CONFIG, "required")
   this.serverConfig.setProperty(BrokerSecurityConfigs.PRINCIPAL_BUILDER_CLASS_CONFIG, classOf[SslAdminIntegrationTest.TestPrincipalBuilder].getName)
-  override protected def securityProtocol = SecurityProtocol.SSL
-  override protected lazy val trustStoreFile = Some(TestUtils.tempFile("truststore", ".jks"))
-  private val adminClients = mutable.Buffer.empty[Admin]
-  override def kafkaPrincipal = new KafkaPrincipal(KafkaPrincipal.USER_TYPE, SslAdminIntegrationTest.serverUser)
 
   override def setUpSasl(): Unit = {
     SslAdminIntegrationTest.semaphore = None
@@ -216,11 +225,12 @@ class SslAdminIntegrationTest extends SaslSslAdminIntegrationTest {
   private def verifyAclUpdates(): Unit = {
     val acl = new AclBinding(new ResourcePattern(ResourceType.TOPIC, "mytopic3", PatternType.LITERAL),
       new AccessControlEntry("User:ANONYMOUS", "*", AclOperation.DESCRIBE, AclPermissionType.ALLOW))
+    val clientPrincipal = new KafkaPrincipal(KafkaPrincipal.USER_TYPE, SslAdminIntegrationTest.clientCn)
 
     def validateRequestContext(context: AuthorizableRequestContext, apiKey: ApiKeys): Unit = {
       assertEquals(SecurityProtocol.SSL, context.securityProtocol)
       assertEquals("SSL", context.listenerName)
-      assertEquals(KafkaPrincipal.ANONYMOUS, context.principal)
+      assertEquals(clientPrincipal, context.principal)
       assertEquals(apiKey.id.toInt, context.requestType)
       assertEquals(apiKey.latestVersion.toInt, context.requestVersion)
       assertTrue(context.correlationId > 0, s"Invalid correlation id: ${context.correlationId}")
@@ -277,7 +287,6 @@ class SslAdminIntegrationTest extends SaslSslAdminIntegrationTest {
   }
 
   override def createAdminClient: Admin = {
-    println("should be passing here")
     val config = new Properties()
     config.put(AdminClientConfig.DEFAULT_API_TIMEOUT_MS_CONFIG, "40000")
     config.put(AdminClientConfig.REQUEST_TIMEOUT_MS_CONFIG, "20000")
@@ -289,6 +298,14 @@ class SslAdminIntegrationTest extends SaslSslAdminIntegrationTest {
   // Override the CN to create a principal based on it
   override def superuserSecurityProps(certAlias: String): Properties = {
     val props = TestUtils.securityConfigs(Mode.CLIENT, securityProtocol, trustStoreFile, certAlias, SslAdminIntegrationTest.superuserCn,
+      clientSaslProperties)
+    props.remove(SslConfigs.SSL_ENDPOINT_IDENTIFICATION_ALGORITHM_CONFIG)
+    props
+  }
+
+  // Override the CN to create a principal based on it
+  override def clientSecurityProps(certAlias: String): Properties = {
+    val props = TestUtils.securityConfigs(Mode.CLIENT, securityProtocol, trustStoreFile, certAlias, SslAdminIntegrationTest.clientCn,
       clientSaslProperties)
     props.remove(SslConfigs.SSL_ENDPOINT_IDENTIFICATION_ALGORITHM_CONFIG)
     props

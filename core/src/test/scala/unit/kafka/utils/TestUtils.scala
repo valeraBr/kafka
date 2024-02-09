@@ -1786,7 +1786,6 @@ object TestUtils extends Logging {
         45000)
   }
 
-
   def waitAndVerifyAcl(expected: AccessControlEntry,
                        authorizer: JAuthorizer,
                        resource: ResourcePattern,
@@ -1801,9 +1800,9 @@ object TestUtils extends Logging {
   }
 
   def waitAndVerifyRemovedAcl(expectedToRemoved: AccessControlEntry,
-                              authorizer: JAuthorizer,
-                              resource: ResourcePattern,
-                              accessControlEntryFilter: AccessControlEntryFilter = AccessControlEntryFilter.ANY): Unit = {
+                       authorizer: JAuthorizer,
+                       resource: ResourcePattern,
+                       accessControlEntryFilter: AccessControlEntryFilter = AccessControlEntryFilter.ANY): Unit = {
     val newLine = scala.util.Properties.lineSeparator
 
     val filter = new AclBindingFilter(resource.toFilter, accessControlEntryFilter)
