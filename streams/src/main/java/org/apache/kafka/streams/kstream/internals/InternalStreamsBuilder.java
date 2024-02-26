@@ -39,6 +39,7 @@ import org.apache.kafka.streams.kstream.internals.graph.GraphNode;
 import org.apache.kafka.streams.kstream.internals.graph.StreamStreamJoinNode;
 import org.apache.kafka.streams.kstream.internals.graph.TableSuppressNode;
 import org.apache.kafka.streams.kstream.internals.graph.TableSourceNode;
+import org.apache.kafka.streams.processor.api.ProcessorSupplier;
 import org.apache.kafka.streams.kstream.internals.graph.VersionedSemanticsGraphNode;
 import org.apache.kafka.streams.kstream.internals.graph.WindowedStreamProcessorNode;
 import org.apache.kafka.streams.processor.internals.InternalTopologyBuilder;
@@ -221,7 +222,7 @@ public class InternalStreamsBuilder implements InternalNameProvider {
     public synchronized <KIn, VIn> void addGlobalStore(final StoreFactory storeFactory,
                                                        final String topic,
                                                        final ConsumedInternal<KIn, VIn> consumed,
-                                                       final org.apache.kafka.streams.processor.api.ProcessorSupplier<KIn, VIn, Void, Void> stateUpdateSupplier) {
+                                                       final ProcessorSupplier<KIn, VIn, Void, Void> stateUpdateSupplier) {
         // explicitly disable logging for global stores
         storeFactory.withLoggingDisabled();
 
@@ -437,7 +438,10 @@ public class InternalStreamsBuilder implements InternalNameProvider {
         if (currentNode instanceof StreamStreamJoinNode && currentNode.parentNodes().size() == 1) {
             final StreamStreamJoinNode joinNode = (StreamStreamJoinNode) currentNode;
             // Remove JoinOtherWindowed node
-            final GraphNode parent = joinNode.parentNodes().stream().findFirst().get();
+            final GraphNode parent = joinNode.parentNodes().stream()
+                    .findFirst()
+                    .orElseThrow(() ->
+                    new IllegalStateException("Parent node is not found. Ensure proper graph construction."));
             GraphNode left = null, right = null;
             for (final GraphNode child: parent.children()) {
                 if (child instanceof WindowedStreamProcessorNode && child.buildPriority() < joinNode.buildPriority()) {
