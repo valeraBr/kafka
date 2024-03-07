@@ -88,7 +88,7 @@ def tryStreamsArchetype() {
 
 def buildNightly() {
     // Trigger the job at 10 AM
-    def currentHour = currentBuild.startTimeInMillis / 1000 / 60 / 60 % 24
+    def currentHour = (currentBuild.startTimeInMillis / 1000 / 60 / 60).trunc() % 24
     return currentHour == 10
 }
 
