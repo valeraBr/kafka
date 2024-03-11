@@ -198,6 +198,7 @@ object KafkaConfig {
 
   val LogMessageTimestampBeforeMaxMsProp = ServerTopicConfigSynonyms.serverSynonym(TopicConfig.MESSAGE_TIMESTAMP_BEFORE_MAX_MS_CONFIG)
   val LogMessageTimestampAfterMaxMsProp = ServerTopicConfigSynonyms.serverSynonym(TopicConfig.MESSAGE_TIMESTAMP_AFTER_MAX_MS_CONFIG)
+  val LogDirFailureTimeoutMsProp = "log.dir.failure.timeout.ms"
 
   val NumRecoveryThreadsPerDataDirProp = "num.recovery.threads.per.data.dir"
   val AutoCreateTopicsEnableProp = "auto.create.topics.enable"
@@ -457,6 +458,10 @@ object KafkaConfig {
     "If log.message.timestamp.type=CreateTime, the message will be rejected if the difference in timestamps exceeds " +
     "this specified threshold. This configuration is ignored if log.message.timestamp.type=LogAppendTime."
 
+  val LogDirFailureTimeoutMsDoc = "If the broker is unable to successfully communicate to the controller that some log " +
+    "directory has failed for longer than this time, and there's at least one partition with leadership on that directory, " +
+    "the broker will fail and shut down."
+
   val NumRecoveryThreadsPerDataDirDoc = "The number of threads per data directory to be used for log recovery at startup and flushing at shutdown"
   val AutoCreateTopicsEnableDoc = "Enable auto creation of topic on the server."
   val MinInSyncReplicasDoc = "When a producer sets acks to \"all\" (or \"-1\"), " +
@@ -692,6 +697,7 @@ object KafkaConfig {
       .define(CreateTopicPolicyClassNameProp, CLASS, null, LOW, CreateTopicPolicyClassNameDoc)
       .define(AlterConfigPolicyClassNameProp, CLASS, null, LOW, AlterConfigPolicyClassNameDoc)
       .define(LogMessageDownConversionEnableProp, BOOLEAN, LogConfig.DEFAULT_MESSAGE_DOWNCONVERSION_ENABLE, LOW, LogMessageDownConversionEnableDoc)
+      .define(LogDirFailureTimeoutMsProp, LONG, Defaults.LOG_DIR_FAILURE_TIMEOUT_MS, atLeast(0), MEDIUM, LogDirFailureTimeoutMsDoc)
 
       /** ********* Replication configuration ***********/
       .define(ReplicationConfigs.CONTROLLER_SOCKET_TIMEOUT_MS_CONFIG, INT, ReplicationConfigs.CONTROLLER_SOCKET_TIMEOUT_MS_DEFAULT, MEDIUM, ReplicationConfigs.CONTROLLER_SOCKET_TIMEOUT_MS_DOC)
@@ -1314,6 +1320,8 @@ class KafkaConfig private(doLog: Boolean, val props: java.util.Map[_, _], dynami
   }
 
   def logMessageDownConversionEnable: Boolean = getBoolean(KafkaConfig.LogMessageDownConversionEnableProp)
+
+  def logDirFailureTimeoutMs: Long = getLong(KafkaConfig.LogDirFailureTimeoutMsProp)
 
   /** ********* Replication configuration ***********/
   val controllerSocketTimeoutMs: Int = getInt(ReplicationConfigs.CONTROLLER_SOCKET_TIMEOUT_MS_CONFIG)
