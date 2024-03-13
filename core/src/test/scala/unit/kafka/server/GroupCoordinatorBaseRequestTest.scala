@@ -463,6 +463,7 @@ class GroupCoordinatorBaseRequestTest(cluster: ClusterInstance) {
     rebalanceTimeoutMs: Int = -1,
     serverAssignor: String = null,
     subscribedTopicNames: List[String] = null,
+    subscribedTopicRegex: String = null,
     topicPartitions: List[ConsumerGroupHeartbeatRequestData.TopicPartitions] = null
   ): ConsumerGroupHeartbeatResponseData = {
     val consumerGroupHeartbeatRequest = new ConsumerGroupHeartbeatRequest.Builder(
@@ -474,6 +475,7 @@ class GroupCoordinatorBaseRequestTest(cluster: ClusterInstance) {
         .setRackId(rackId)
         .setRebalanceTimeoutMs(rebalanceTimeoutMs)
         .setSubscribedTopicNames(subscribedTopicNames.asJava)
+        .setSubscribedTopicRegex(subscribedTopicRegex)
         .setServerAssignor(serverAssignor)
         .setTopicPartitions(topicPartitions.asJava),
       true

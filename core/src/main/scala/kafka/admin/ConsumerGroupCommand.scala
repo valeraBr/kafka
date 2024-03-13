@@ -43,6 +43,8 @@ import scala.collection.immutable.TreeMap
 import scala.reflect.ClassTag
 import org.apache.kafka.common.requests.ListOffsetsResponse
 
+import java.util.regex.{Pattern, PatternSyntaxException}
+
 object ConsumerGroupCommand extends Logging {
 
   def main(args: Array[String]): Unit = {
@@ -599,7 +601,7 @@ object ConsumerGroupCommand extends Logging {
         case (groupId, groupDescriptionFuture) => (groupId, groupDescriptionFuture.get())
       }
     }
-
+    
     /**
       * Returns the state of the specified consumer group and partition assignment states
       */

@@ -47,6 +47,9 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
+import java.util.function.BiFunction;
+import java.util.regex.Pattern;
+import java.util.stream.Collectors;
 
 import static org.apache.kafka.coordinator.group.consumer.ConsumerGroup.ConsumerGroupState.ASSIGNING;
 import static org.apache.kafka.coordinator.group.consumer.ConsumerGroup.ConsumerGroupState.EMPTY;
@@ -130,6 +133,11 @@ public class ConsumerGroup implements Group {
     private final TimelineHashMap<String, String> staticMembers;
 
     /**
+     *
+     */
+    private final TimelineHashMap<String, Integer> subscribedTopicRegex;
+
+    /**
      * The number of members supporting each server assignor name.
      */
     private final TimelineHashMap<String, Integer> serverAssignors;
@@ -191,6 +199,7 @@ public class ConsumerGroup implements Group {
         this.groupEpoch = new TimelineInteger(snapshotRegistry);
         this.members = new TimelineHashMap<>(snapshotRegistry, 0);
         this.staticMembers = new TimelineHashMap<>(snapshotRegistry, 0);
+        this.subscribedTopicRegex = new TimelineHashMap<>(snapshotRegistry, 0);
         this.serverAssignors = new TimelineHashMap<>(snapshotRegistry, 0);
         this.subscribedTopicNames = new TimelineHashMap<>(snapshotRegistry, 0);
         this.subscribedTopicMetadata = new TimelineHashMap<>(snapshotRegistry, 0);
@@ -344,13 +353,14 @@ public class ConsumerGroup implements Group {
      * Updates the member.
      *
      * @param newMember The new member state.
+     * @param topicsImage The current metadata for all available topics.
      */
-    public void updateMember(ConsumerGroupMember newMember) {
+    public void updateMember(ConsumerGroupMember newMember, TopicsImage topicsImage) {
         if (newMember == null) {
             throw new IllegalArgumentException("newMember cannot be null.");
         }
         ConsumerGroupMember oldMember = members.put(newMember.memberId(), newMember);
-        maybeUpdateSubscribedTopicNames(oldMember, newMember);
+        maybeUpdateSubscribedTopicNames(topicsImage, oldMember, newMember);
         maybeUpdateServerAssignors(oldMember, newMember);
         maybeUpdatePartitionEpoch(oldMember, newMember);
         updateStaticMember(newMember);
@@ -372,10 +382,11 @@ public class ConsumerGroup implements Group {
      * Remove the member from the group.
      *
      * @param memberId The member id to remove.
+     * @param topicsImage The current metadata for all available topics.
      */
-    public void removeMember(String memberId) {
+    public void removeMember(String memberId, TopicsImage topicsImage) {
         ConsumerGroupMember oldMember = members.remove(memberId);
-        maybeUpdateSubscribedTopicNames(oldMember, null);
+        maybeUpdateSubscribedTopicNames(topicsImage, oldMember, null);
         maybeUpdateServerAssignors(oldMember, null);
         maybeRemovePartitionEpoch(oldMember);
         removeStaticMember(oldMember);
@@ -430,6 +441,13 @@ public class ConsumerGroup implements Group {
      */
     public Set<String> subscribedTopicNames() {
         return Collections.unmodifiableSet(subscribedTopicNames.keySet());
+    }
+
+    /**
+     * @return An immutable Set containing all the subscribed topic regex.
+     */
+    public Set<String> subscribedTopicRegex() {
+        return Collections.unmodifiableSet(subscribedTopicRegex.keySet());
     }
 
     /**
@@ -579,11 +597,11 @@ public class ConsumerGroup implements Group {
     ) {
         // Copy and update the current subscriptions.
         Map<String, Integer> subscribedTopicNames = new HashMap<>(this.subscribedTopicNames);
-        maybeUpdateSubscribedTopicNames(subscribedTopicNames, oldMember, newMember);
+        Map<String, Integer> subscribedTopicRegex = new HashMap<>(this.subscribedTopicRegex);
+        maybeUpdateSubscribedTopicNames(topicsImage, subscribedTopicNames, subscribedTopicRegex, oldMember, newMember);
 
         // Create the topic metadata for each subscribed topic.
         Map<String, TopicMetadata> newSubscriptionMetadata = new HashMap<>(subscribedTopicNames.size());
-
         subscribedTopicNames.forEach((topicName, count) -> {
             TopicImage topicImage = topicsImage.getTopic(topicName);
             if (topicImage != null) {
@@ -830,38 +848,54 @@ public class ConsumerGroup implements Group {
     /**
      * Updates the subscribed topic names count.
      *
+     * @param topicsImage The current metadata for all available topics.
      * @param oldMember The old member.
      * @param newMember The new member.
      */
     private void maybeUpdateSubscribedTopicNames(
-        ConsumerGroupMember oldMember,
-        ConsumerGroupMember newMember
+            TopicsImage topicsImage,
+            ConsumerGroupMember oldMember,
+            ConsumerGroupMember newMember
     ) {
-        maybeUpdateSubscribedTopicNames(subscribedTopicNames, oldMember, newMember);
+        maybeUpdateSubscribedTopicNames(topicsImage, subscribedTopicNames, subscribedTopicRegex, oldMember, newMember);
     }
 
     /**
      * Updates the subscription count.
      *
+     * @param topicsImage            The current metadata for all available topics.
      * @param subscribedTopicCount  The map to update.
      * @param oldMember             The old member.
      * @param newMember             The new member.
      */
     private static void maybeUpdateSubscribedTopicNames(
+        TopicsImage topicsImage,
         Map<String, Integer> subscribedTopicCount,
+        Map<String, Integer> subscribedRegexCount,
         ConsumerGroupMember oldMember,
         ConsumerGroupMember newMember
     ) {
         if (oldMember != null) {
-            oldMember.subscribedTopicNames().forEach(topicName ->
-                subscribedTopicCount.compute(topicName, ConsumerGroup::decValue)
-            );
+            processMemberSubscribedTopics(topicsImage, subscribedTopicCount, subscribedRegexCount, oldMember, ConsumerGroup::decValue);
         }
-
         if (newMember != null) {
-            newMember.subscribedTopicNames().forEach(topicName ->
-                subscribedTopicCount.compute(topicName, ConsumerGroup::incValue)
-            );
+            processMemberSubscribedTopics(topicsImage, subscribedTopicCount, subscribedRegexCount, newMember, ConsumerGroup::incValue);
+        }
+    }
+
+    private static void processMemberSubscribedTopics(TopicsImage topicsImage,
+                                                      Map<String, Integer> subscribedTopicCount,
+                                                      Map<String, Integer> subscribedRegexCount,
+                                                      ConsumerGroupMember member,
+                                                      BiFunction<String, Integer, Integer> valueUpdater
+    ) {
+        String memberRegex = member.subscribedTopicRegex();
+        List<String> topicNames = member.subscribedTopicNames();
+        topicNames.forEach(topicName -> subscribedTopicCount.compute(topicName, valueUpdater));
+        if (memberRegex != null && !memberRegex.isEmpty()) {
+            getRegexSubscribedTopics(topicsImage, memberRegex)
+                    .forEach(topicName -> subscribedTopicCount.compute(topicName, valueUpdater));
+            subscribedRegexCount.compute(memberRegex, valueUpdater);
         }
     }
 
@@ -959,6 +993,15 @@ public class ConsumerGroup implements Group {
                 return partitionsOrNull;
             });
         });
+    }
+
+    private static List<String> getRegexSubscribedTopics(TopicsImage topics, String regex) {
+        Pattern pattern = Pattern.compile(regex);
+        return topics.topicsByName().entrySet()
+                .stream()
+                .filter(entry -> pattern.matcher(entry.getKey()).matches())
+                .map(Map.Entry::getKey)
+                .collect(Collectors.toList());
     }
 
     /**

@@ -99,6 +99,7 @@ import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Function;
+import java.util.regex.Pattern;
 import java.util.function.Predicate;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
@@ -322,6 +323,11 @@ public class GroupMetadataManager {
     private final TimelineHashMap<String, TimelineHashSet<String>> groupsByTopics;
 
     /**
+     * The group ids keyed by regex expression
+     */
+    private final TimelineHashMap<String, TimelineHashSet<String>> groupsByRegex;
+
+    /**
      * The maximum number of members allowed in a single consumer group.
      */
     private final int consumerGroupMaxSize;
@@ -409,6 +415,7 @@ public class GroupMetadataManager {
         this.defaultAssignor = assignors.get(0);
         this.groups = new TimelineHashMap<>(snapshotRegistry, 0);
         this.groupsByTopics = new TimelineHashMap<>(snapshotRegistry, 0);
+        this.groupsByRegex = new TimelineHashMap<>(snapshotRegistry, 0);
         this.consumerGroupMaxSize = consumerGroupMaxSize;
         this.consumerGroupSessionTimeoutMs = consumerGroupSessionTimeoutMs;
         this.consumerGroupHeartbeatIntervalMs = consumerGroupHeartbeatIntervalMs;
@@ -806,8 +813,11 @@ public class GroupMetadataManager {
             if (request.topicPartitions() == null || !request.topicPartitions().isEmpty()) {
                 throw new InvalidRequestException("TopicPartitions must be empty when (re-)joining.");
             }
-            if (request.subscribedTopicNames() == null || request.subscribedTopicNames().isEmpty()) {
-                throw new InvalidRequestException("SubscribedTopicNames must be set in first request.");
+            if (isSubscribedTopicNamesEmpty(request) && isSubscribedTopicRegexEmpty(request)) {
+                throw new InvalidRequestException("Either SubscribedTopicNames or SubscribedTopicRegex must be set in first request.");
+            }
+            if (!isSubscribedTopicNamesEmpty(request) && !isSubscribedTopicRegexEmpty(request)) {
+                throw new InvalidRequestException("Both SubscribedTopicNames and SubscribedTopicRegex should not be set at the same time.");
             }
         } else if (request.memberEpoch() == LEAVE_GROUP_STATIC_MEMBER_EPOCH) {
             throwIfEmptyString(request.memberId(), "MemberId can't be empty.");
@@ -1007,6 +1017,7 @@ public class GroupMetadataManager {
         String clientId,
         String clientHost,
         List<String> subscribedTopicNames,
+        String subscribedTopicRegex,
         String assignorName,
         List<ConsumerGroupHeartbeatRequestData.TopicPartitions> ownedTopicPartitions
     ) throws ApiException {
@@ -1073,6 +1084,7 @@ public class GroupMetadataManager {
             .maybeUpdateRebalanceTimeoutMs(ofSentinel(rebalanceTimeoutMs))
             .maybeUpdateServerAssignorName(Optional.ofNullable(assignorName))
             .maybeUpdateSubscribedTopicNames(Optional.ofNullable(subscribedTopicNames))
+            .maybeUpdateSubscribedTopicRegex(Optional.ofNullable(subscribedTopicRegex))
             .setClientId(clientId)
             .setClientHost(clientHost)
             .build();
@@ -1490,6 +1502,7 @@ public class GroupMetadataManager {
                 context.clientId(),
                 context.clientAddress.toString(),
                 request.subscribedTopicNames(),
+                request.subscribedTopicRegex(),
                 request.serverAssignor(),
                 request.topicPartitions()
             );
@@ -1513,12 +1526,13 @@ public class GroupMetadataManager {
 
         ConsumerGroup consumerGroup = getOrMaybeCreateConsumerGroup(groupId, value != null);
         Set<String> oldSubscribedTopicNames = new HashSet<>(consumerGroup.subscribedTopicNames());
+        Set<String> oldSubscribedTopicRegex = new HashSet<>(consumerGroup.subscribedTopicRegex());
 
         if (value != null) {
             ConsumerGroupMember oldMember = consumerGroup.getOrMaybeCreateMember(memberId, true);
             consumerGroup.updateMember(new ConsumerGroupMember.Builder(oldMember)
                 .updateWith(value)
-                .build());
+                .build(), metadataImage.topics());
         } else {
             ConsumerGroupMember oldMember = consumerGroup.getOrMaybeCreateMember(memberId, false);
             if (oldMember.memberEpoch() != LEAVE_GROUP_MEMBER_EPOCH) {
@@ -1529,10 +1543,10 @@ public class GroupMetadataManager {
                 throw new IllegalStateException("Received a tombstone record to delete member " + memberId
                     + " but did not receive ConsumerGroupTargetAssignmentMetadataValue tombstone.");
             }
-            consumerGroup.removeMember(memberId);
+            consumerGroup.removeMember(memberId, metadataImage.topics());
         }
 
-        updateGroupsByTopics(groupId, oldSubscribedTopicNames, consumerGroup.subscribedTopicNames());
+        updateGroupsByTopics(groupId, oldSubscribedTopicNames, oldSubscribedTopicRegex, consumerGroup.subscribedTopicNames(), consumerGroup.subscribedTopicRegex());
     }
 
     /**
@@ -1584,7 +1598,9 @@ public class GroupMetadataManager {
     private void updateGroupsByTopics(
         String groupId,
         Set<String> oldSubscribedTopics,
-        Set<String> newSubscribedTopics
+        Set<String> oldSubscribedTopicRegex,
+        Set<String> newSubscribedTopics,
+        Set<String> newSubscribedTopicRegex
     ) {
         if (oldSubscribedTopics.isEmpty()) {
             newSubscribedTopics.forEach(topicName ->
@@ -1603,6 +1619,33 @@ public class GroupMetadataManager {
             newSubscribedTopics.forEach(topicName -> {
                 if (!oldSubscribedTopics.contains(topicName)) {
                     subscribeGroupToTopic(groupId, topicName);
+                }
+            });
+        }
+        if (!oldSubscribedTopicRegex.isEmpty()) {
+            oldSubscribedTopicRegex.forEach(regex -> {
+                groupsByRegex.computeIfPresent(regex, (__, groupIds) -> {
+                    groupIds.remove(groupId);
+                    return groupIds.isEmpty() ? null : groupIds;
+                });
+                Pattern pattern = Pattern.compile(regex);
+                for (String topicName : metadataImage.topics().topicsByName().keySet()) {
+                    if (pattern.matcher(topicName).matches()) {
+                        unsubscribeGroupFromTopic(groupId, topicName);
+                    }
+                }
+            });
+        }
+        if (!newSubscribedTopicRegex.isEmpty()) {
+            newSubscribedTopicRegex.forEach(regex -> {
+                groupsByRegex
+                        .computeIfAbsent(regex, __ -> new TimelineHashSet<>(snapshotRegistry, 1))
+                        .add(groupId);
+                Pattern pattern = Pattern.compile(regex);
+                for (String topicName : metadataImage.topics().topicsByName().keySet()) {
+                    if (pattern.matcher(topicName).matches()) {
+                        subscribeGroupToTopic(groupId, topicName);
+                    }
                 }
             });
         }
@@ -1739,7 +1782,7 @@ public class GroupMetadataManager {
             ConsumerGroupMember newMember = new ConsumerGroupMember.Builder(oldMember)
                 .updateWith(value)
                 .build();
-            consumerGroup.updateMember(newMember);
+            consumerGroup.updateMember(newMember, metadataImage.topics());
         } else {
             ConsumerGroupMember newMember = new ConsumerGroupMember.Builder(oldMember)
                 .setMemberEpoch(LEAVE_GROUP_MEMBER_EPOCH)
@@ -1749,7 +1792,7 @@ public class GroupMetadataManager {
                 .setPartitionsPendingRevocation(Collections.emptyMap())
                 .setPartitionsPendingAssignment(Collections.emptyMap())
                 .build();
-            consumerGroup.updateMember(newMember);
+            consumerGroup.updateMember(newMember, metadataImage.topics());
         }
     }
 
@@ -3562,5 +3605,13 @@ public class GroupMetadataManager {
      */
     static String classicGroupSyncKey(String groupId) {
         return "sync-" + groupId;
+    }
+
+    private boolean isSubscribedTopicNamesEmpty(ConsumerGroupHeartbeatRequestData request) {
+        return request.subscribedTopicNames() == null || request.subscribedTopicNames().isEmpty();
+    }
+
+    private boolean isSubscribedTopicRegexEmpty(ConsumerGroupHeartbeatRequestData request) {
+        return request.subscribedTopicRegex() == null || request.subscribedTopicRegex().isEmpty();
     }
 }

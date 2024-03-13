@@ -322,6 +322,7 @@ public class HeartbeatRequestManagerTest {
         assertEquals(subscribedTopics, heartbeatRequest.data().subscribedTopicNames());
         assertEquals(DEFAULT_GROUP_INSTANCE_ID, heartbeatRequest.data().instanceId());
         assertEquals(DEFAULT_REMOTE_ASSIGNOR, heartbeatRequest.data().serverAssignor());
+        assertNull(heartbeatRequest.data().subscribedTopicRegex());
     }
 
     @ParameterizedTest
@@ -399,6 +400,7 @@ public class HeartbeatRequestManagerTest {
         assertNull(data.instanceId());
         assertEquals(ConsumerTestBuilder.DEFAULT_MAX_POLL_INTERVAL_MS, data.rebalanceTimeoutMs());
         assertEquals(Collections.emptyList(), data.subscribedTopicNames());
+        assertNull(data.subscribedTopicRegex());
         assertEquals(ConsumerTestBuilder.DEFAULT_REMOTE_ASSIGNOR, data.serverAssignor());
         assertEquals(Collections.emptyList(), data.topicPartitions());
         membershipManager.onHeartbeatRequestSent();
@@ -413,6 +415,7 @@ public class HeartbeatRequestManagerTest {
         assertNull(data.instanceId());
         assertEquals(-1, data.rebalanceTimeoutMs());
         assertNull(data.subscribedTopicNames());
+        assertNull(data.subscribedTopicRegex());
         assertNull(data.serverAssignor());
         assertNull(data.topicPartitions());
         membershipManager.onHeartbeatRequestSent();
@@ -430,6 +433,7 @@ public class HeartbeatRequestManagerTest {
         assertNull(data.instanceId());
         assertEquals(-1, data.rebalanceTimeoutMs());
         assertEquals(Collections.singletonList(topic), data.subscribedTopicNames());
+        assertNull(data.subscribedTopicRegex());
         assertNull(data.serverAssignor());
         assertNull(data.topicPartitions());
         membershipManager.onHeartbeatRequestSent();

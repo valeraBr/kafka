@@ -59,6 +59,8 @@ import static org.mockito.Mockito.verify;
 
 public class ConsumerGroupTest {
 
+    private MetadataImage metadataImage = MetadataImage.EMPTY;
+
     private ConsumerGroup createConsumerGroup(String groupId) {
         SnapshotRegistry snapshotRegistry = new SnapshotRegistry(new LogContext());
         return new ConsumerGroup(
@@ -96,7 +98,7 @@ public class ConsumerGroupTest {
             .setSubscribedTopicNames(Arrays.asList("foo", "bar"))
             .build();
 
-        consumerGroup.updateMember(member);
+        consumerGroup.updateMember(member, metadataImage.topics());
 
         assertEquals(member, consumerGroup.getOrMaybeCreateMember("member", false));
     }
@@ -122,7 +124,7 @@ public class ConsumerGroupTest {
             .setInstanceId("instance")
             .build();
 
-        consumerGroup.updateMember(member);
+        consumerGroup.updateMember(member, metadataImage.topics());
 
         assertEquals(member, consumerGroup.staticMember("instance"));
         assertEquals(member, consumerGroup.getOrMaybeCreateMember("member", false));
@@ -136,7 +138,7 @@ public class ConsumerGroupTest {
         consumerGroup.getOrMaybeCreateMember("member", true);
         assertTrue(consumerGroup.hasMember("member"));
 
-        consumerGroup.removeMember("member");
+        consumerGroup.removeMember("member", metadataImage.topics());
         assertFalse(consumerGroup.hasMember("member"));
 
     }
@@ -154,9 +156,9 @@ public class ConsumerGroupTest {
             .setInstanceId("instance")
             .build();
 
-        consumerGroup.updateMember(member);
+        consumerGroup.updateMember(member, metadataImage.topics());
 
-        consumerGroup.removeMember("member");
+        consumerGroup.removeMember("member",  metadataImage.topics());
         assertFalse(consumerGroup.hasMember("member"));
         assertNull(consumerGroup.staticMember("instance"));
         assertNull(consumerGroup.staticMemberId("instance"));
@@ -181,7 +183,7 @@ public class ConsumerGroupTest {
                 mkTopicAssignment(zarTopicId, 7, 8, 9)))
             .build();
 
-        consumerGroup.updateMember(member);
+        consumerGroup.updateMember(member, metadataImage.topics());
 
         assertEquals(10, consumerGroup.currentPartitionEpoch(fooTopicId, 1));
         assertEquals(10, consumerGroup.currentPartitionEpoch(fooTopicId, 2));
@@ -203,7 +205,7 @@ public class ConsumerGroupTest {
                 mkTopicAssignment(fooTopicId, 7, 8, 9)))
             .build();
 
-        consumerGroup.updateMember(member);
+        consumerGroup.updateMember(member, metadataImage.topics());
 
         assertEquals(11, consumerGroup.currentPartitionEpoch(barTopicId, 1));
         assertEquals(11, consumerGroup.currentPartitionEpoch(barTopicId, 2));
@@ -230,7 +232,7 @@ public class ConsumerGroupTest {
                 mkTopicAssignment(fooTopicId, 1)))
             .build();
 
-        consumerGroup.updateMember(member);
+        consumerGroup.updateMember(member, metadataImage.topics());
 
         assertEquals(10, consumerGroup.currentPartitionEpoch(fooTopicId, 1));
 
@@ -241,7 +243,7 @@ public class ConsumerGroupTest {
             .setPartitionsPendingRevocation(Collections.emptyMap())
             .build();
 
-        consumerGroup.updateMember(member);
+        consumerGroup.updateMember(member, metadataImage.topics());
 
         assertEquals(11, consumerGroup.currentPartitionEpoch(fooTopicId, 1));
     }
@@ -257,7 +259,7 @@ public class ConsumerGroupTest {
                 mkTopicAssignment(fooTopicId, 1)))
             .build();
 
-        consumerGroup.updateMember(m1);
+        consumerGroup.updateMember(m1, metadataImage.topics());
 
         ConsumerGroupMember m2 = new ConsumerGroupMember.Builder("m2")
             .setMemberEpoch(10)
@@ -267,7 +269,7 @@ public class ConsumerGroupTest {
 
         // m2 should not be able to acquire foo-1 because the partition is
         // still owned by another member.
-        assertThrows(IllegalStateException.class, () -> consumerGroup.updateMember(m2));
+        assertThrows(IllegalStateException.class, () -> consumerGroup.updateMember(m2, metadataImage.topics()));
     }
 
     @Test
@@ -289,7 +291,7 @@ public class ConsumerGroupTest {
                 mkTopicAssignment(fooTopicId, 1)))
             .build();
 
-        consumerGroup.updateMember(m1);
+        consumerGroup.updateMember(m1, metadataImage.topics());
 
         // Removing should fail because the expected epoch is incorrect.
         assertThrows(IllegalStateException.class, () -> consumerGroup.removePartitionEpochs(
@@ -341,7 +343,7 @@ public class ConsumerGroupTest {
                 mkTopicAssignment(zarTopicId, 7, 8, 9)))
             .build();
 
-        consumerGroup.updateMember(member);
+        consumerGroup.updateMember(member, metadataImage.topics());
 
         assertEquals(10, consumerGroup.currentPartitionEpoch(fooTopicId, 1));
         assertEquals(10, consumerGroup.currentPartitionEpoch(fooTopicId, 2));
@@ -353,7 +355,7 @@ public class ConsumerGroupTest {
         assertEquals(-1, consumerGroup.currentPartitionEpoch(zarTopicId, 8));
         assertEquals(-1, consumerGroup.currentPartitionEpoch(zarTopicId, 9));
 
-        consumerGroup.removeMember(member.memberId());
+        consumerGroup.removeMember(member.memberId(), metadataImage.topics());
 
         assertEquals(-1, consumerGroup.currentPartitionEpoch(barTopicId, 1));
         assertEquals(-1, consumerGroup.currentPartitionEpoch(barTopicId, 2));
@@ -378,7 +380,7 @@ public class ConsumerGroupTest {
             .setTargetMemberEpoch(1)
             .build();
 
-        consumerGroup.updateMember(member1);
+        consumerGroup.updateMember(member1, metadataImage.topics());
         consumerGroup.setGroupEpoch(1);
 
         assertEquals(ConsumerGroupMember.MemberState.STABLE, member1.state());
@@ -390,7 +392,7 @@ public class ConsumerGroupTest {
             .setTargetMemberEpoch(1)
             .build();
 
-        consumerGroup.updateMember(member2);
+        consumerGroup.updateMember(member2, metadataImage.topics());
         consumerGroup.setGroupEpoch(2);
 
         assertEquals(ConsumerGroupMember.MemberState.STABLE, member2.state());
@@ -406,7 +408,7 @@ public class ConsumerGroupTest {
             .setTargetMemberEpoch(2)
             .build();
 
-        consumerGroup.updateMember(member1);
+        consumerGroup.updateMember(member1, metadataImage.topics());
 
         assertEquals(ConsumerGroupMember.MemberState.STABLE, member1.state());
         assertEquals(ConsumerGroup.ConsumerGroupState.RECONCILING, consumerGroup.state());
@@ -420,7 +422,7 @@ public class ConsumerGroupTest {
                 mkTopicAssignment(fooTopicId, 0)))
             .build();
 
-        consumerGroup.updateMember(member2);
+        consumerGroup.updateMember(member2, metadataImage.topics());
 
         assertEquals(ConsumerGroupMember.MemberState.ASSIGNING, member2.state());
         assertEquals(ConsumerGroup.ConsumerGroupState.RECONCILING, consumerGroup.state());
@@ -434,13 +436,13 @@ public class ConsumerGroupTest {
             .setPartitionsPendingAssignment(Collections.emptyMap())
             .build();
 
-        consumerGroup.updateMember(member2);
+        consumerGroup.updateMember(member2, metadataImage.topics());
 
         assertEquals(ConsumerGroupMember.MemberState.STABLE, member2.state());
         assertEquals(ConsumerGroup.ConsumerGroupState.STABLE, consumerGroup.state());
 
-        consumerGroup.removeMember("member1");
-        consumerGroup.removeMember("member2");
+        consumerGroup.removeMember("member1", metadataImage.topics());
+        consumerGroup.removeMember("member2", metadataImage.topics());
 
         assertEquals(ConsumerGroup.ConsumerGroupState.EMPTY, consumerGroup.state());
     }
@@ -485,7 +487,7 @@ public class ConsumerGroupTest {
         );
 
         // Update the group with member 1.
-        consumerGroup.updateMember(member1);
+        consumerGroup.updateMember(member1, metadataImage.topics());
 
         // Member 1 is in the group so the assignor should be range.
         assertEquals(
@@ -508,7 +510,7 @@ public class ConsumerGroupTest {
         );
 
         // Update the group with member 2.
-        consumerGroup.updateMember(member2);
+        consumerGroup.updateMember(member2, metadataImage.topics());
 
         // Member 1 and 2 are in the group so the assignor should be range.
         assertEquals(
@@ -517,7 +519,7 @@ public class ConsumerGroupTest {
         );
 
         // Update the group with member 3.
-        consumerGroup.updateMember(member3);
+        consumerGroup.updateMember(member3, metadataImage.topics());
 
         // Member 1, 2 and 3 are in the group so the assignor should be range.
         assertEquals(
@@ -542,7 +544,7 @@ public class ConsumerGroupTest {
         assertTrue(assignor.equals(Optional.of("range")) || assignor.equals(Optional.of("uniform")));
 
         // Update the group.
-        consumerGroup.updateMember(updatedMember1);
+        consumerGroup.updateMember(updatedMember1, metadataImage.topics());
 
         // Member 2 has removed it assignor but this is not reflected in the group yet so
         // we pass the updated member. The assignor should be range or uniform.
@@ -552,7 +554,7 @@ public class ConsumerGroupTest {
         );
 
         // Update the group.
-        consumerGroup.updateMember(updatedMember2);
+        consumerGroup.updateMember(updatedMember2, metadataImage.topics());
 
         // Only member 3 is left in the group so the assignor should be uniform.
         assertEquals(
@@ -568,7 +570,7 @@ public class ConsumerGroupTest {
         );
 
         // Update the group.
-        consumerGroup.updateMember(updatedMember3);
+        consumerGroup.updateMember(updatedMember3, metadataImage.topics());
 
         // The group is empty so the assignor should be empty as well.
         assertEquals(
@@ -582,11 +584,13 @@ public class ConsumerGroupTest {
         Uuid fooTopicId = Uuid.randomUuid();
         Uuid barTopicId = Uuid.randomUuid();
         Uuid zarTopicId = Uuid.randomUuid();
+        Uuid foodTopicId = Uuid.randomUuid();
 
         MetadataImage image = new MetadataImageBuilder()
             .addTopic(fooTopicId, "foo", 1)
             .addTopic(barTopicId, "bar", 2)
             .addTopic(zarTopicId, "zar", 3)
+            .addTopic(foodTopicId, "food", 4)
             .addRacks()
             .build();
 
@@ -598,6 +602,10 @@ public class ConsumerGroupTest {
             .build();
         ConsumerGroupMember member3 = new ConsumerGroupMember.Builder("member3")
             .setSubscribedTopicNames(Collections.singletonList("zar"))
+            .build();
+        ConsumerGroupMember member4 = new ConsumerGroupMember.Builder("member4")
+            .setSubscribedTopicRegex("^foo.*")
+            .setSubscribedTopicNames(Collections.emptyList())
             .build();
 
         ConsumerGroup consumerGroup = createConsumerGroup("group-foo");
@@ -627,7 +635,7 @@ public class ConsumerGroupTest {
         );
 
         // Updating the group with member1.
-        consumerGroup.updateMember(member1);
+        consumerGroup.updateMember(member1, metadataImage.topics());
 
         // It should return foo now.
         assertEquals(
@@ -668,7 +676,7 @@ public class ConsumerGroupTest {
         );
 
         // Updating the group with member2.
-        consumerGroup.updateMember(member2);
+        consumerGroup.updateMember(member2, metadataImage.topics());
 
         // It should return foo and bar.
         assertEquals(
@@ -726,7 +734,7 @@ public class ConsumerGroupTest {
         );
 
         // Updating group with member3.
-        consumerGroup.updateMember(member3);
+        consumerGroup.updateMember(member3, metadataImage.topics());
 
         // It should return foo, bar and zar.
         assertEquals(
@@ -741,6 +749,104 @@ public class ConsumerGroupTest {
                 image.topics(),
                 image.cluster()
             )
+        );
+
+        // Removing member1 results in returning bar and zar.
+        assertEquals(
+                mkMap(
+                        mkEntry("bar", new TopicMetadata(barTopicId, "bar", 2, mkMapOfPartitionRacks(2))),
+                        mkEntry("zar", new TopicMetadata(zarTopicId, "zar", 3, mkMapOfPartitionRacks(3)))
+                ),
+                consumerGroup.computeSubscriptionMetadata(
+                        member1,
+                        null,
+                        image.topics(),
+                        image.cluster()
+                )
+        );
+
+        // Updating group with removal of member1.
+        consumerGroup.removeMember(member1.memberId(), metadataImage.topics());
+
+        // Compute while taking into account member 4
+        assertEquals(
+                mkMap(
+                        mkEntry("bar", new TopicMetadata(barTopicId, "bar", 2, mkMapOfPartitionRacks(2))),
+                        mkEntry("zar", new TopicMetadata(zarTopicId, "zar", 3, mkMapOfPartitionRacks(3))),
+                        mkEntry("foo", new TopicMetadata(fooTopicId, "foo", 1, mkMapOfPartitionRacks(1))),
+                        mkEntry("food", new TopicMetadata(foodTopicId, "food", 4, mkMapOfPartitionRacks(4)))
+                ),
+                consumerGroup.computeSubscriptionMetadata(
+                        null,
+                        member4,
+                        image.topics(),
+                        image.cluster()
+                )
+        );
+    }
+
+    @Test
+    public void testUpdateSubscriptionTopicRegex() {
+        Uuid fooTopicId = Uuid.randomUuid();
+        Uuid barTopicId = Uuid.randomUuid();
+        Uuid zarTopicId = Uuid.randomUuid();
+        Uuid foodTopicId = Uuid.randomUuid();
+
+        MetadataImage image = new GroupMetadataManagerTest.MetadataImageBuilder()
+                .addTopic(fooTopicId, "foo", 1)
+                .addTopic(barTopicId, "bar", 2)
+                .addTopic(zarTopicId, "zar", 3)
+                .addTopic(foodTopicId, "food", 4)
+                .addRacks()
+                .build();
+
+        ConsumerGroupMember member1 = new ConsumerGroupMember.Builder("member1")
+                .setSubscribedTopicRegex("^f.*")
+                .setSubscribedTopicNames(Collections.emptyList())
+                .build();
+
+        // Same member id with member1
+        ConsumerGroupMember member2 = new ConsumerGroupMember.Builder(member1)
+                .setSubscribedTopicRegex("^z.*")
+                .setMemberEpoch(2)
+                .setPreviousMemberEpoch(1)
+                .setTargetMemberEpoch(2)
+                .build();
+
+        ConsumerGroup consumerGroup = createConsumerGroup("group-foo");
+
+        // Compute while taking into account member 1.
+        assertEquals(
+                mkMap(
+                        mkEntry("foo", new TopicMetadata(fooTopicId, "foo", 1, mkMapOfPartitionRacks(1))),
+                        mkEntry("food", new TopicMetadata(foodTopicId, "food", 4, mkMapOfPartitionRacks(4)))
+                ),
+                consumerGroup.computeSubscriptionMetadata(
+                        null,
+                        member1,
+                        image.topics(),
+                        image.cluster()
+                )
+        );
+
+        // Updating the group with member1.
+        consumerGroup.updateMember(member1, image.topics());
+
+        // Updating the group with member2.
+        consumerGroup.updateMember(member2, image.topics());
+
+
+        // It should return zar.
+        assertEquals(
+                mkMap(
+                        mkEntry("zar", new TopicMetadata(zarTopicId, "zar", 3, mkMapOfPartitionRacks(3)))
+                ),
+                consumerGroup.computeSubscriptionMetadata(
+                        null,
+                        null,
+                        image.topics(),
+                        image.cluster()
+                )
         );
     }
 
@@ -834,7 +940,7 @@ public class ConsumerGroupTest {
         assertEquals(ConsumerGroup.ConsumerGroupState.EMPTY.toString(), group.stateAsString(0));
         group.updateMember(new ConsumerGroupMember.Builder("member1")
             .setSubscribedTopicNames(Collections.singletonList("foo"))
-            .build());
+            .build(), metadataImage.topics());
         snapshotRegistry.getOrCreateSnapshot(1);
         assertEquals(ConsumerGroup.ConsumerGroupState.EMPTY.toString(), group.stateAsString(0));
         assertEquals(ConsumerGroup.ConsumerGroupState.STABLE.toString(), group.stateAsString(1));
@@ -884,7 +990,7 @@ public class ConsumerGroupTest {
             .setPreviousMemberEpoch(0)
             .setTargetMemberEpoch(1)
             .build();
-        consumerGroup.updateMember(member1);
+        consumerGroup.updateMember(member1, metadataImage.topics());
 
         assertEquals(ConsumerGroup.ConsumerGroupState.RECONCILING, consumerGroup.state());
         assertThrows(GroupNotEmptyException.class, consumerGroup::validateDeleteGroup);
@@ -936,8 +1042,8 @@ public class ConsumerGroupTest {
 
         ConsumerGroup consumerGroup = createConsumerGroup("group-foo");
 
-        consumerGroup.updateMember(member1);
-        consumerGroup.updateMember(member2);
+        consumerGroup.updateMember(member1, image.topics());
+        consumerGroup.updateMember(member2, image.topics());
 
         assertEquals(
             mkMap(
@@ -955,10 +1061,10 @@ public class ConsumerGroupTest {
         assertTrue(consumerGroup.isSubscribedToTopic("foo"));
         assertTrue(consumerGroup.isSubscribedToTopic("bar"));
 
-        consumerGroup.removeMember("member1");
+        consumerGroup.removeMember("member1", image.topics());
         assertFalse(consumerGroup.isSubscribedToTopic("foo"));
 
-        consumerGroup.removeMember("member2");
+        consumerGroup.removeMember("member2", image.topics());
         assertFalse(consumerGroup.isSubscribedToTopic("bar"));
     }
 
@@ -972,9 +1078,9 @@ public class ConsumerGroupTest {
         group.updateMember(new ConsumerGroupMember.Builder("member1")
                 .setSubscribedTopicNames(Collections.singletonList("foo"))
                 .setServerAssignorName("assignorName")
-                .build());
+                .build(), metadataImage.topics());
         group.updateMember(new ConsumerGroupMember.Builder("member2")
-                .build());
+                .build(), metadataImage.topics());
         snapshotRegistry.getOrCreateSnapshot(1);
 
         ConsumerGroupDescribeResponseData.DescribedGroup expected = new ConsumerGroupDescribeResponseData.DescribedGroup()
@@ -1017,7 +1123,7 @@ public class ConsumerGroupTest {
             .setTargetMemberEpoch(1)
             .build();
 
-        consumerGroup.updateMember(member);
+        consumerGroup.updateMember(member, metadataImage.topics());
 
         assertEquals(ConsumerGroup.ConsumerGroupState.RECONCILING, consumerGroup.state());
         verify(metrics, times(1)).onConsumerGroupStateTransition(ConsumerGroup.ConsumerGroupState.EMPTY, ConsumerGroup.ConsumerGroupState.RECONCILING);
@@ -1032,7 +1138,7 @@ public class ConsumerGroupTest {
         assertEquals(ConsumerGroup.ConsumerGroupState.STABLE, consumerGroup.state());
         verify(metrics, times(1)).onConsumerGroupStateTransition(ConsumerGroup.ConsumerGroupState.ASSIGNING, ConsumerGroup.ConsumerGroupState.STABLE);
 
-        consumerGroup.removeMember("member");
+        consumerGroup.removeMember("member", metadataImage.topics());
 
         assertEquals(ConsumerGroup.ConsumerGroupState.EMPTY, consumerGroup.state());
         verify(metrics, times(1)).onConsumerGroupStateTransition(ConsumerGroup.ConsumerGroupState.STABLE, ConsumerGroup.ConsumerGroupState.EMPTY);
@@ -1053,7 +1159,7 @@ public class ConsumerGroupTest {
 
         group.updateMember(new ConsumerGroupMember.Builder("member1")
             .setSubscribedTopicNames(Collections.singletonList("foo"))
-            .build());
+            .build(), metadataImage.topics());
         snapshotRegistry.getOrCreateSnapshot(1);
         assertTrue(group.isInStates(Collections.singleton("empty"), 0));
         assertTrue(group.isInStates(Collections.singleton("stable"), 1));
