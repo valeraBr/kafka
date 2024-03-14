@@ -19,6 +19,8 @@ package kafka.test;
 
 import kafka.network.SocketServer;
 import kafka.server.BrokerFeatures;
+import kafka.server.BrokerServer;
+import kafka.server.KafkaBroker;
 import kafka.test.annotation.ClusterTest;
 import org.apache.kafka.clients.admin.Admin;
 import org.apache.kafka.common.network.ListenerName;
@@ -28,6 +30,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Properties;
 import java.util.Set;
+import java.util.stream.Stream;
 
 public interface ClusterInstance {
 
@@ -92,6 +95,8 @@ public interface ClusterInstance {
      * The broker connect string which can be used by clients for bootstrapping to the controller quorum.
      */
     String bootstrapControllers();
+
+    Stream<KafkaBroker> brokers();
 
     /**
      * A collection of all brokers in the cluster. In ZK-based clusters this will also include the broker which is

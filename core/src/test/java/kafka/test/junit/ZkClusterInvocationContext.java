@@ -20,6 +20,7 @@ package kafka.test.junit;
 import kafka.api.IntegrationTestHarness;
 import kafka.network.SocketServer;
 import kafka.server.BrokerFeatures;
+import kafka.server.KafkaBroker;
 import kafka.server.KafkaConfig;
 import kafka.server.KafkaServer;
 import kafka.test.ClusterConfig;
@@ -346,6 +347,10 @@ public class ZkClusterInvocationContext implements TestTemplateInvocationContext
 
         public Stream<KafkaServer> servers() {
             return JavaConverters.asJavaCollection(clusterReference.get().servers()).stream();
+        }
+
+        public Stream<KafkaBroker> brokers() {
+            return JavaConverters.asJavaCollection(clusterReference.get().brokers()).stream();
         }
     }
 }
