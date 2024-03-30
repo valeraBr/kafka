@@ -27,6 +27,7 @@ import org.apache.kafka.common.requests.TransactionResult;
 import org.apache.kafka.common.utils.LogContext;
 import org.apache.kafka.common.utils.Time;
 import org.apache.kafka.common.utils.Utils;
+import org.apache.kafka.coordinator.group.GroupConfigManager;
 import org.apache.kafka.coordinator.group.metrics.CoordinatorRuntimeMetrics;
 import org.apache.kafka.coordinator.group.metrics.CoordinatorMetrics;
 import org.apache.kafka.deferred.DeferredEvent;
@@ -101,6 +102,7 @@ public class CoordinatorRuntime<S extends CoordinatorShard<U>, U> implements Aut
         private Duration defaultWriteTimeout;
         private CoordinatorRuntimeMetrics runtimeMetrics;
         private CoordinatorMetrics coordinatorMetrics;
+        private GroupConfigManager groupConfigManager;
 
         public Builder<S, U> withLogPrefix(String logPrefix) {
             this.logPrefix = logPrefix;
@@ -157,6 +159,11 @@ public class CoordinatorRuntime<S extends CoordinatorShard<U>, U> implements Aut
             return this;
         }
 
+        public Builder<S, U> withGroupConfigManager(GroupConfigManager groupConfigManager) {
+            this.groupConfigManager = groupConfigManager;
+            return this;
+        }
+
         public CoordinatorRuntime<S, U> build() {
             if (logPrefix == null)
                 logPrefix = "";
@@ -178,6 +185,8 @@ public class CoordinatorRuntime<S extends CoordinatorShard<U>, U> implements Aut
                 throw new IllegalArgumentException("CoordinatorRuntimeMetrics must be set.");
             if (coordinatorMetrics == null)
                 throw new IllegalArgumentException("CoordinatorMetrics must be set.");
+            if (groupConfigManager == null)
+                throw new IllegalArgumentException("GroupManager must be set.");
 
             return new CoordinatorRuntime<>(
                 logPrefix,
@@ -190,7 +199,8 @@ public class CoordinatorRuntime<S extends CoordinatorShard<U>, U> implements Aut
                 timer,
                 defaultWriteTimeout,
                 runtimeMetrics,
-                coordinatorMetrics
+                coordinatorMetrics,
+                groupConfigManager
             );
         }
     }
@@ -495,11 +505,11 @@ public class CoordinatorRuntime<S extends CoordinatorShard<U>, U> implements Aut
                             .withTimer(timer)
                             .withCoordinatorMetrics(coordinatorMetrics)
                             .withTopicPartition(tp)
+                            .withGroupConfigManager(groupConfigManager)
                             .build(),
                         tp
                     );
                     break;
-
                 case ACTIVE:
                     state = CoordinatorState.ACTIVE;
                     highWatermarklistener = new HighWatermarkListener();
@@ -1320,6 +1330,11 @@ public class CoordinatorRuntime<S extends CoordinatorShard<U>, U> implements Aut
     private final CoordinatorMetrics coordinatorMetrics;
 
     /**
+     * The group config manager.
+     */
+    private final GroupConfigManager groupConfigManager;
+
+    /**
      * Atomic boolean indicating whether the runtime is running.
      */
     private final AtomicBoolean isRunning = new AtomicBoolean(true);
@@ -1353,7 +1368,8 @@ public class CoordinatorRuntime<S extends CoordinatorShard<U>, U> implements Aut
         Timer timer,
         Duration defaultWriteTimeout,
         CoordinatorRuntimeMetrics runtimeMetrics,
-        CoordinatorMetrics coordinatorMetrics
+        CoordinatorMetrics coordinatorMetrics,
+        GroupConfigManager groupConfigManager
     ) {
         this.logPrefix = logPrefix;
         this.logContext = logContext;
@@ -1368,6 +1384,7 @@ public class CoordinatorRuntime<S extends CoordinatorShard<U>, U> implements Aut
         this.coordinatorShardBuilderSupplier = coordinatorShardBuilderSupplier;
         this.runtimeMetrics = runtimeMetrics;
         this.coordinatorMetrics = coordinatorMetrics;
+        this.groupConfigManager = groupConfigManager;
     }
 
     /**
