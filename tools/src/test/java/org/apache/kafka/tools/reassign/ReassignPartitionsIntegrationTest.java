@@ -74,6 +74,7 @@ import java.util.stream.IntStream;
 
 import static java.util.Arrays.asList;
 import static org.apache.kafka.server.common.MetadataVersion.IBP_2_7_IV1;
+import static org.apache.kafka.server.common.MetadataVersion.IBP_3_0_IV1;
 import static org.apache.kafka.test.TestUtils.DEFAULT_MAX_WAIT_MS;
 import static org.apache.kafka.tools.reassign.ReassignPartitionsCommand.BROKER_LEVEL_FOLLOWER_THROTTLE;
 import static org.apache.kafka.tools.reassign.ReassignPartitionsCommand.BROKER_LEVEL_LEADER_THROTTLE;
@@ -117,20 +118,25 @@ public class ReassignPartitionsIntegrationTest extends QuorumTestHarness {
     }
 
     @ParameterizedTest
-    @ValueSource(strings = "zk") // Note: KRaft requires AlterPartition
+    @ValueSource(strings = {"zk", "kraft"})
     public void testReassignmentWithAlterPartitionDisabled(String quorum) throws Exception {
         // Test reassignment when the IBP is on an older version which does not use
         // the `AlterPartition` API. In this case, the controller will register individual
         // watches for each reassigning partition so that the reassignment can be
         // completed as soon as the ISR is expanded.
-        Map<String, String> configOverrides = Collections.singletonMap(KafkaConfig.InterBrokerProtocolVersionProp(), IBP_2_7_IV1.version());
+        Map<String, String> configOverrides;
+        if (quorum.equals("zk")) {
+            configOverrides = Collections.singletonMap(KafkaConfig.InterBrokerProtocolVersionProp(), IBP_2_7_IV1.version());
+        } else {
+            configOverrides = Collections.singletonMap(KafkaConfig.InterBrokerProtocolVersionProp(), IBP_3_0_IV1.version());
+        }
         cluster = new ReassignPartitionsTestCluster(configOverrides, Collections.emptyMap());
         cluster.setup();
         executeAndVerifyReassignment();
     }
 
     @ParameterizedTest
-    @ValueSource(strings = "zk") // Note: KRaft requires AlterPartition
+    @ValueSource(strings = {"zk", "kraft"})
     public void testReassignmentCompletionDuringPartialUpgrade(String quorum) throws Exception {
         // Test reassignment during a partial upgrade when some brokers are relying on
         // `AlterPartition` and some rely on the old notification logic through Zookeeper.
@@ -139,11 +145,16 @@ public class ReassignPartitionsIntegrationTest extends QuorumTestHarness {
         // We want to ensure that reassignment can still complete through the ISR change
         // notification path even though the controller expects `AlterPartition`.
 
-        // Override change notification settings so that test is not delayed by ISR
-        // change notification delay
-        ZkAlterPartitionManager.DefaultIsrPropagationConfig_$eq(new IsrChangePropagationConfig(500, 100, 500));
+        Map<String, String> oldIbpConfig;
+        if (quorum.equals("zk")) {
+            // Override change notification settings so that test is not delayed by ISR
+            // change notification delay
+            ZkAlterPartitionManager.DefaultIsrPropagationConfig_$eq(new IsrChangePropagationConfig(500, 100, 500));
+            oldIbpConfig = Collections.singletonMap(KafkaConfig.InterBrokerProtocolVersionProp(), IBP_2_7_IV1.version());
+        } else {
+            oldIbpConfig = Collections.singletonMap(KafkaConfig.InterBrokerProtocolVersionProp(), IBP_3_0_IV1.version());
+        }
 
-        Map<String, String> oldIbpConfig = Collections.singletonMap(KafkaConfig.InterBrokerProtocolVersionProp(), IBP_2_7_IV1.version());
         Map<Integer, Map<String, String>> brokerConfigOverrides = new HashMap<>();
         brokerConfigOverrides.put(1, oldIbpConfig);
         brokerConfigOverrides.put(2, oldIbpConfig);
@@ -536,7 +547,7 @@ public class ReassignPartitionsIntegrationTest extends QuorumTestHarness {
      * Test moving partitions between directories.
      */
     @ParameterizedTest
-    @ValueSource(strings = "zk") // JBOD not yet implemented for KRaft
+    @ValueSource(strings = {"zk", "kraft"})
     public void testLogDirReassignment(String quorum) throws Exception {
         TopicPartition topicPartition = new TopicPartition("foo", 0);
 
@@ -586,7 +597,7 @@ public class ReassignPartitionsIntegrationTest extends QuorumTestHarness {
     }
 
     @ParameterizedTest
-    @ValueSource(strings = "zk") // JBOD not yet implemented for KRaft
+    @ValueSource(strings = {"zk", "kraft"})
     public void testAlterLogDirReassignmentThrottle(String quorum) throws Exception {
         TopicPartition topicPartition = new TopicPartition("foo", 0);
 
