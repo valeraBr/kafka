@@ -89,6 +89,7 @@ import java.lang.reflect.InvocationTargetException;
 import java.nio.ByteBuffer;
 import java.nio.file.Path;
 import java.security.PrivilegedAction;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
@@ -115,6 +116,8 @@ import java.util.concurrent.ScheduledThreadPoolExecutor;
 import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.locks.Condition;
+import java.util.concurrent.locks.ReentrantLock;
 import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 import java.util.function.Function;
@@ -150,6 +153,8 @@ public class RemoteLogManager implements Closeable {
 
     private final RemoteLogMetadataManager remoteLogMetadataManager;
 
+    private final ReentrantLock copyQuotaManagerLock = new ReentrantLock();
+    private final Condition copyQuotaManagerLockCondition = copyQuotaManagerLock.newCondition();
     private final RLMQuotaManager rlmCopyQuotaManager;
     private final RLMQuotaManager rlmFetchQuotaManager;
 
@@ -231,6 +236,13 @@ public class RemoteLogManager implements Closeable {
     private void removeMetrics() {
         metricsGroup.removeMetric(REMOTE_LOG_MANAGER_TASKS_AVG_IDLE_PERCENT_METRIC.getName());
         remoteStorageReaderThreadPool.removeMetrics();
+    }
+
+    /**
+     * Returns the timeout for the RLM Tasks to wait for the quota to be available
+     */
+    Duration quotaTimeout() {
+        return Duration.ofSeconds(1);
     }
 
     RLMQuotaManager createRLMCopyQuotaManager() {
@@ -728,6 +740,23 @@ public class RemoteLogManager implements Closeable {
                                 logger.info("Skipping copying log segments as the current task state is changed, cancelled: {} leader:{}",
                                         isCancelled(), isLeader());
                                 return;
+                            }
+
+                            copyQuotaManagerLock.lock();
+                            try {
+                                while (rlmCopyQuotaManager.isQuotaExceeded()) {
+                                    logger.debug("Quota exceeded for copying log segments, waiting for the quota to be available.");
+                                    try {
+                                        copyQuotaManagerLockCondition.await(quotaTimeout().toMillis(), TimeUnit.MILLISECONDS);
+                                    } catch (InterruptedException e) {
+                                        logger.warn("Interrupted while waiting for the quota to be available for copying log segments.");
+                                    }
+                                }
+                                rlmCopyQuotaManager.record(candidateLogSegment.logSegment.log().sizeInBytes());
+                                // Signal waiting threads to check the quota again
+                                copyQuotaManagerLockCondition.signalAll();
+                            } finally {
+                                copyQuotaManagerLock.unlock();
                             }
                             copyLogSegment(log, candidateLogSegment.logSegment, candidateLogSegment.nextSegmentOffset);
                         }
