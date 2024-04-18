@@ -44,8 +44,12 @@ public abstract class ExtractField<R extends ConnectRecord<R>> implements Transf
             .define(FIELD_CONFIG, ConfigDef.Type.STRING, ConfigDef.NO_DEFAULT_VALUE, ConfigDef.Importance.MEDIUM, "Field name to extract.");
 
     private static final String PURPOSE = "field extraction";
+    private static final String KEY_CONVERTER_REPLACE_NULL_WITH_DEFAULT_CONFIG = "key.converter.replace.null.with.default";
+    private static final String VALUE_CONVERTER_REPLACE_NULL_WITH_DEFAULT_CONFIG = "value.converter.replace.null.with.default";
 
     private String fieldName;
+    protected boolean keyConverterReplaceNullWithDefault;
+    protected boolean valueConverterReplaceNullWithDefault;
 
     @Override
     public String version() {
@@ -56,6 +60,8 @@ public abstract class ExtractField<R extends ConnectRecord<R>> implements Transf
     public void configure(Map<String, ?> props) {
         final SimpleConfig config = new SimpleConfig(CONFIG_DEF, props);
         fieldName = config.getString(FIELD_CONFIG);
+        keyConverterReplaceNullWithDefault = props.get(KEY_CONVERTER_REPLACE_NULL_WITH_DEFAULT_CONFIG) == null || (boolean) props.get(KEY_CONVERTER_REPLACE_NULL_WITH_DEFAULT_CONFIG);
+        valueConverterReplaceNullWithDefault = props.get(VALUE_CONVERTER_REPLACE_NULL_WITH_DEFAULT_CONFIG) == null || (boolean) props.get(VALUE_CONVERTER_REPLACE_NULL_WITH_DEFAULT_CONFIG);
     }
 
     @Override
@@ -72,7 +78,12 @@ public abstract class ExtractField<R extends ConnectRecord<R>> implements Transf
                 throw new IllegalArgumentException("Unknown field: " + fieldName);
             }
 
-            return newRecord(record, field.schema(), value == null ? null : value.get(fieldName));
+            if (replaceNullWithDefault()) {
+                return newRecord(record, field.schema(), value == null ? null : value.get(fieldName));
+            }
+
+            return newRecord(record, field.schema(), value == null ? null : value.getWithoutDefault(fieldName));
+
         }
     }
 
@@ -91,6 +102,8 @@ public abstract class ExtractField<R extends ConnectRecord<R>> implements Transf
 
     protected abstract R newRecord(R record, Schema updatedSchema, Object updatedValue);
 
+    protected abstract boolean replaceNullWithDefault();
+
     public static class Key<R extends ConnectRecord<R>> extends ExtractField<R> {
         @Override
         protected Schema operatingSchema(R record) {
@@ -105,6 +118,11 @@ public abstract class ExtractField<R extends ConnectRecord<R>> implements Transf
         @Override
         protected R newRecord(R record, Schema updatedSchema, Object updatedValue) {
             return record.newRecord(record.topic(), record.kafkaPartition(), updatedSchema, updatedValue, record.valueSchema(), record.value(), record.timestamp());
+        }
+
+        @Override
+        protected boolean replaceNullWithDefault() {
+            return keyConverterReplaceNullWithDefault;
         }
     }
 
@@ -122,6 +140,11 @@ public abstract class ExtractField<R extends ConnectRecord<R>> implements Transf
         @Override
         protected R newRecord(R record, Schema updatedSchema, Object updatedValue) {
             return record.newRecord(record.topic(), record.kafkaPartition(), record.keySchema(), record.key(), updatedSchema, updatedValue, record.timestamp());
+        }
+
+        @Override
+        protected boolean replaceNullWithDefault() {
+            return valueConverterReplaceNullWithDefault;
         }
     }
 
