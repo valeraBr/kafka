@@ -697,7 +697,7 @@ object KafkaConfig {
       .define(CreateTopicPolicyClassNameProp, CLASS, null, LOW, CreateTopicPolicyClassNameDoc)
       .define(AlterConfigPolicyClassNameProp, CLASS, null, LOW, AlterConfigPolicyClassNameDoc)
       .define(LogMessageDownConversionEnableProp, BOOLEAN, LogConfig.DEFAULT_MESSAGE_DOWNCONVERSION_ENABLE, LOW, LogMessageDownConversionEnableDoc)
-      .define(LogDirFailureTimeoutMsProp, LONG, Defaults.LOG_DIR_FAILURE_TIMEOUT_MS, atLeast(0), MEDIUM, LogDirFailureTimeoutMsDoc)
+      .define(LogDirFailureTimeoutMsProp, LONG, Defaults.LOG_DIR_FAILURE_TIMEOUT_MS, atLeast(1), LOW, LogDirFailureTimeoutMsDoc)
 
       /** ********* Replication configuration ***********/
       .define(ReplicationConfigs.CONTROLLER_SOCKET_TIMEOUT_MS_CONFIG, INT, ReplicationConfigs.CONTROLLER_SOCKET_TIMEOUT_MS_DEFAULT, MEDIUM, ReplicationConfigs.CONTROLLER_SOCKET_TIMEOUT_MS_DOC)
