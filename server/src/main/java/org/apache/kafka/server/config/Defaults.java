@@ -85,6 +85,7 @@ public class Defaults {
     public static final int LOG_FLUSH_START_OFFSET_CHECKPOINT_INTERVAL_MS = 60000;
     public static final int NUM_RECOVERY_THREADS_PER_DATA_DIR = 1;
     public static final boolean AUTO_CREATE_TOPICS_ENABLE = true;
+    public static final long LOG_DIR_FAILURE_TIMEOUT_MS = 30000L;
 
     /** ********* Controlled shutdown configuration *********/
     public static final int CONTROLLED_SHUTDOWN_MAX_RETRIES = 3;
