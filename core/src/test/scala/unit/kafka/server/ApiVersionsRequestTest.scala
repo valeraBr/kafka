@@ -38,7 +38,7 @@ class ApiVersionsRequestTest(cluster: ClusterInstance) extends AbstractApiVersio
     super.brokerPropertyOverrides(config.serverProperties())
   }
 
-  @ClusterTest(metadataVersion = MetadataVersion.IBP_3_8_IV0, serverProperties = Array(
+  @ClusterTest(metadataVersion = MetadataVersion.IBP_3_8_IV1, serverProperties = Array(
     new ClusterConfigProperty(key = "unstable.api.versions.enable", value = "false"),
     new ClusterConfigProperty(key = "unstable.metadata.versions.enable", value = "true"),
   ))
