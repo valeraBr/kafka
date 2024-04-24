@@ -47,15 +47,15 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import java.io.BufferedWriter;
 import java.io.File;
 import java.io.FileWriter;
-import java.text.SimpleDateFormat;
 import java.time.Duration;
 import java.time.LocalDateTime;
+import java.time.ZoneId;
+import java.time.ZonedDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
-import java.util.Date;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
@@ -240,10 +240,10 @@ public class ResetConsumerGroupOffsetTest {
 
     @ClusterTest
     public void testResetOffsetsToZonedDateTime() throws Exception {
-        SimpleDateFormat format = new SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSSXXX");
+        DateTimeFormatter format = DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm:ss.SSSXXX");
 
         produceMessages(TOPIC, 50);
-        Date checkpoint = new Date();
+        ZonedDateTime checkpoint = LocalDateTime.now().atZone(ZoneId.systemDefault());
         produceMessages(TOPIC, 50);
 
         ConsumerGroupExecutor executor = addConsumerGroupExecutor(1, TOPIC, GROUP, GroupProtocol.CLASSIC.name);
