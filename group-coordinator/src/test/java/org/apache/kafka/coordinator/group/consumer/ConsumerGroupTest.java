@@ -52,8 +52,8 @@ import static org.apache.kafka.common.utils.Utils.mkMap;
 import static org.apache.kafka.coordinator.group.AssignmentTestUtil.mkAssignment;
 import static org.apache.kafka.coordinator.group.AssignmentTestUtil.mkTopicAssignment;
 import static org.apache.kafka.coordinator.group.RecordHelpersTest.mkMapOfPartitionRacks;
-import static org.apache.kafka.coordinator.group.assignor.ConsumerGroupSubscriptionModel.HETEROGENEOUS;
-import static org.apache.kafka.coordinator.group.assignor.ConsumerGroupSubscriptionModel.HOMOGENEOUS;
+import static org.apache.kafka.coordinator.group.assignor.SubscriptionType.HETEROGENEOUS;
+import static org.apache.kafka.coordinator.group.assignor.SubscriptionType.HOMOGENEOUS;
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -741,7 +741,7 @@ public class ConsumerGroupTest {
     }
 
     @Test
-    public void testUpdateSubscribedTopicNamesAndSubscriptionModel() {
+    public void testUpdateSubscribedTopicNamesAndSubscriptionType() {
         ConsumerGroupMember member1 = new ConsumerGroupMember.Builder("member1")
             .setSubscribedTopicNames(Collections.singletonList("foo"))
             .build();
@@ -763,7 +763,7 @@ public class ConsumerGroupTest {
         // It should be Homogeneous by default.
         assertEquals(
             HOMOGENEOUS,
-            consumerGroup.groupSubscriptionModel()
+            consumerGroup.subscriptionType()
         );
 
         consumerGroup.updateMember(member1);
@@ -771,28 +771,28 @@ public class ConsumerGroupTest {
         // It should be Homogeneous since there is just 1 member
         assertEquals(
             HOMOGENEOUS,
-            consumerGroup.groupSubscriptionModel()
+            consumerGroup.subscriptionType()
         );
 
         consumerGroup.updateMember(member2);
 
         assertEquals(
             HETEROGENEOUS,
-            consumerGroup.groupSubscriptionModel()
+            consumerGroup.subscriptionType()
         );
 
         consumerGroup.updateMember(member3);
 
         assertEquals(
             HETEROGENEOUS,
-            consumerGroup.groupSubscriptionModel()
+            consumerGroup.subscriptionType()
         );
 
         consumerGroup.removeMember(member1.memberId());
 
         assertEquals(
             HOMOGENEOUS,
-            consumerGroup.groupSubscriptionModel()
+            consumerGroup.subscriptionType()
         );
 
         ConsumerGroupMember member4 = new ConsumerGroupMember.Builder("member2")
@@ -803,7 +803,7 @@ public class ConsumerGroupTest {
 
         assertEquals(
             HETEROGENEOUS,
-            consumerGroup.groupSubscriptionModel()
+            consumerGroup.subscriptionType()
         );
     }
 
