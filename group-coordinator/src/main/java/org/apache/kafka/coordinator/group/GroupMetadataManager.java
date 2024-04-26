@@ -1291,7 +1291,6 @@ public class GroupMetadataManager {
             .build();
 
         boolean bumpGroupEpoch = false;
-        Map<String, Integer> subscribedTopicsMemberCount = new HashMap<>();
 
         if (!updatedMember.equals(member)) {
             records.add(newMemberSubscriptionRecord(groupId, updatedMember));
@@ -1299,8 +1298,6 @@ public class GroupMetadataManager {
             if (!updatedMember.subscribedTopicNames().equals(member.subscribedTopicNames())) {
                 log.info("[GroupId {}] Member {} updated its subscribed topics to: {}.",
                     groupId, memberId, updatedMember.subscribedTopicNames());
-
-                ConsumerGroup.maybeUpdateSubscribedTopicNames(subscribedTopicsMemberCount, member, updatedMember);
                 bumpGroupEpoch = true;
             }
 
@@ -1311,7 +1308,9 @@ public class GroupMetadataManager {
             }
         }
 
+        Map<String, Integer> subscribedTopicsMemberCount = new HashMap<>();
         if (bumpGroupEpoch || group.hasMetadataExpired(currentTimeMs)) {
+            subscribedTopicsMemberCount = group.updateSubscribedTopicNames(member, updatedMember);
             // The subscription metadata is updated in two cases:
             // 1) The member has updated its subscriptions;
             // 2) The refresh deadline has been reached.
@@ -1353,7 +1352,7 @@ public class GroupMetadataManager {
                         .withMembers(group.members())
                         .withStaticMembers(group.staticMembers())
                         .withSubscriptionMetadata(subscriptionMetadata)
-                        .withSubscriptionType(ConsumerGroup.maybeUpdateGroupSubscriptionType(
+                        .withSubscriptionType(ConsumerGroup.subscriptionType(
                             subscribedTopicsMemberCount,
                             group.numMembers(),
                             group.subscriptionType()
@@ -1580,8 +1579,7 @@ public class GroupMetadataManager {
 
             // We update the subscription metadata without the leaving member.
             Map<String, TopicMetadata> subscriptionMetadata = group.computeSubscriptionMetadata(
-                member,
-                null,
+                group.updateSubscribedTopicNames(member, null),
                 metadataImage.topics(),
                 metadataImage.cluster()
             );
