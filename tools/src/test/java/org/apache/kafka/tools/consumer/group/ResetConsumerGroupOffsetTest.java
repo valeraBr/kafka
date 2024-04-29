@@ -27,16 +27,13 @@ import org.apache.kafka.clients.admin.Admin;
 import org.apache.kafka.clients.admin.AdminClientConfig;
 import org.apache.kafka.clients.admin.NewTopic;
 import org.apache.kafka.clients.consumer.Consumer;
-import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.apache.kafka.clients.consumer.GroupProtocol;
 import org.apache.kafka.clients.consumer.KafkaConsumer;
 import org.apache.kafka.clients.consumer.OffsetAndMetadata;
-import org.apache.kafka.clients.consumer.RangeAssignor;
 import org.apache.kafka.clients.producer.KafkaProducer;
 import org.apache.kafka.clients.producer.Producer;
 import org.apache.kafka.clients.producer.ProducerRecord;
 import org.apache.kafka.common.TopicPartition;
-import org.apache.kafka.common.errors.WakeupException;
 import org.apache.kafka.common.serialization.ByteArraySerializer;
 import org.apache.kafka.common.serialization.StringDeserializer;
 import org.apache.kafka.test.TestUtils;
@@ -47,41 +44,33 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import java.io.BufferedWriter;
 import java.io.File;
 import java.io.FileWriter;
-import java.time.Duration;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.time.ZonedDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.Collection;
-import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Properties;
 import java.util.Set;
 import java.util.concurrent.ExecutionException;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
-import java.util.concurrent.TimeUnit;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
+import static java.time.LocalDateTime.now;
+import static java.util.Arrays.asList;
+import static java.util.Collections.singleton;
 import static java.util.Collections.singletonList;
 import static java.util.Collections.singletonMap;
 import static java.util.stream.Collectors.toMap;
 import static org.apache.kafka.clients.CommonClientConfigs.BOOTSTRAP_SERVERS_CONFIG;
 import static org.apache.kafka.clients.consumer.ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG;
 import static org.apache.kafka.clients.consumer.ConsumerConfig.GROUP_ID_CONFIG;
-import static org.apache.kafka.clients.consumer.ConsumerConfig.GROUP_REMOTE_ASSIGNOR_CONFIG;
-import static org.apache.kafka.clients.consumer.ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG;
-import static org.apache.kafka.clients.consumer.ConsumerConfig.PARTITION_ASSIGNMENT_STRATEGY_CONFIG;
-import static org.apache.kafka.clients.consumer.ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG;
 import static org.apache.kafka.clients.producer.ProducerConfig.ACKS_CONFIG;
 import static org.apache.kafka.clients.producer.ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG;
 import static org.apache.kafka.clients.producer.ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG;
@@ -129,12 +118,12 @@ public class ResetConsumerGroupOffsetTest {
     }
 
     private String[] buildArgsForGroups(List<String> groups, String... args) {
-        List<String> res = new ArrayList<>(Arrays.asList(basicArgs()));
+        List<String> res = new ArrayList<>(asList(basicArgs()));
         for (String group : groups) {
             res.add("--group");
             res.add(group);
         }
-        res.addAll(Arrays.asList(args));
+        res.addAll(asList(args));
         return res.toArray(new String[0]);
     }
 
@@ -143,9 +132,9 @@ public class ResetConsumerGroupOffsetTest {
     }
 
     private String[] buildArgsForAllGroups(String... args) {
-        List<String> res = new ArrayList<>(Arrays.asList(basicArgs()));
+        List<String> res = new ArrayList<>(asList(basicArgs()));
         res.add("--all-groups");
-        res.addAll(Arrays.asList(args));
+        res.addAll(asList(args));
         return res.toArray(new String[0]);
     }
 
@@ -178,9 +167,10 @@ public class ResetConsumerGroupOffsetTest {
         produceMessages(TOPIC, 100);
         List<String> groups = generateIds(GROUP);
         for (String group : groups) {
-            ConsumerGroupExecutor executor = addConsumerGroupExecutor(1, TOPIC, group, GroupProtocol.CLASSIC.name);
-            awaitConsumerProgress(TOPIC, group, 100L);
-            executor.shutdown();
+            try (AutoCloseable ignored =
+                         addConsumerGroupExecutor(1, TOPIC, group, GroupProtocol.CLASSIC.name)) {
+                awaitConsumerProgress(TOPIC, group, 100L);
+            }
         }
         String[] args = buildArgsForGroups(groups, "--topic", TOPIC, "--to-offset", "50");
         resetAndAssertOffsets(args, 50, true, singletonList(TOPIC));
@@ -194,9 +184,10 @@ public class ResetConsumerGroupOffsetTest {
         produceMessages(TOPIC, 100);
         for (int i = 1; i <= 3; i++) {
             String group = GROUP + i;
-            ConsumerGroupExecutor executor = addConsumerGroupExecutor(1, TOPIC, group, GroupProtocol.CLASSIC.name);
-            awaitConsumerProgress(TOPIC, group, 100L);
-            executor.shutdown();
+            try (AutoCloseable ignored =
+                         addConsumerGroupExecutor(1, TOPIC, group, GroupProtocol.CLASSIC.name)) {
+                awaitConsumerProgress(TOPIC, group, 100L);
+            }
         }
         resetAndAssertOffsets(args, 50, true, singletonList(TOPIC));
         resetAndAssertOffsets(addTo(args, "--dry-run"), 50, true, singletonList(TOPIC));
@@ -212,10 +203,10 @@ public class ResetConsumerGroupOffsetTest {
 
         for (String topic : topics) {
             for (String group : groups) {
-                ConsumerGroupExecutor executor =
-                        addConsumerGroupExecutor(3, topic, group, GroupProtocol.CLASSIC.name);
-                awaitConsumerProgress(topic, group, 100);
-                executor.shutdown();
+                try (AutoCloseable ignored =
+                             addConsumerGroupExecutor(3, topic, group, GroupProtocol.CLASSIC.name)) {
+                    awaitConsumerProgress(topic, group, 100);
+                }
             }
         }
         resetAndAssertOffsets(args, 50, true, topics);
@@ -226,13 +217,13 @@ public class ResetConsumerGroupOffsetTest {
     @ClusterTest
     public void testResetOffsetsToLocalDateTime() throws Exception {
         DateTimeFormatter format = DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm:ss.SSS");
-        LocalDateTime dateTime = LocalDateTime.now().minusDays(1);
+        LocalDateTime dateTime = now().minusDays(1);
 
         produceMessages(TOPIC, 100);
 
-        ConsumerGroupExecutor executor = addConsumerGroupExecutor(1, TOPIC, GROUP, GroupProtocol.CLASSIC.name);
-        awaitConsumerProgress(TOPIC, GROUP, 100L);
-        executor.shutdown();
+        try (AutoCloseable ignored = addConsumerGroupExecutor(1, TOPIC, GROUP, GroupProtocol.CLASSIC.name)) {
+            awaitConsumerProgress(TOPIC, GROUP, 100L);
+        }
 
         String[] args = buildArgsForGroup(GROUP, "--all-topics", "--to-datetime", format.format(dateTime), "--execute");
         resetAndAssertOffsets(args, 0);
@@ -243,14 +234,14 @@ public class ResetConsumerGroupOffsetTest {
         DateTimeFormatter format = DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm:ss.SSSXXX");
 
         produceMessages(TOPIC, 50);
-        ZonedDateTime checkpoint = LocalDateTime.now().atZone(ZoneId.systemDefault());
+        ZonedDateTime checkpoint = now().atZone(ZoneId.systemDefault());
         produceMessages(TOPIC, 50);
-
-        ConsumerGroupExecutor executor = addConsumerGroupExecutor(1, TOPIC, GROUP, GroupProtocol.CLASSIC.name);
-        awaitConsumerProgress(TOPIC, GROUP, 100L);
-        executor.shutdown();
-
-        String[] args = buildArgsForGroup(GROUP, "--all-topics", "--to-datetime", format.format(checkpoint), "--execute");
+        try (AutoCloseable ignored = addConsumerGroupExecutor(1, TOPIC, GROUP, GroupProtocol.CLASSIC.name)) {
+            awaitConsumerProgress(TOPIC, GROUP, 100L);
+        }
+        String[] args = buildArgsForGroup(GROUP,
+            "--all-topics", "--to-datetime", format.format(checkpoint),
+            "--execute");
         resetAndAssertOffsets(args, 50);
     }
 
@@ -264,7 +255,6 @@ public class ResetConsumerGroupOffsetTest {
     @ClusterTest
     public void testResetOffsetsByDurationToEarliest() throws Exception {
         String[] args = buildArgsForGroup(GROUP, "--all-topics", "--by-duration", "PT0.1S", "--execute");
-
         produceConsumeAndShutdown(TOPIC, GROUP, 1);
         resetAndAssertOffsets(args, 100);
     }
@@ -275,9 +265,9 @@ public class ResetConsumerGroupOffsetTest {
         String[] args = buildArgsForGroup(GROUP, "--topic", topic, "--by-duration", "PT1M", "--execute");
 
         try (Admin admin = cluster.createAdminClient()) {
-            admin.createTopics(Collections.singleton(new NewTopic(topic, 1, (short) 1))).all().get();
+            admin.createTopics(singleton(new NewTopic(topic, 1, (short) 1))).all().get();
             resetAndAssertOffsets(args, 0, false, singletonList("foo2"));
-            admin.deleteTopics(Collections.singleton(topic)).all().get();
+            admin.deleteTopics(singleton(topic)).all().get();
         }
     }
 
@@ -354,7 +344,7 @@ public class ResetConsumerGroupOffsetTest {
     public void testResetOffsetsToEarliestOnOneTopicAndPartition() throws Exception {
         String topic = "bar";
         try (Admin admin = cluster.createAdminClient()) {
-            admin.createTopics(Collections.singleton(new NewTopic(topic, 2, (short) 1))).all().get();
+            admin.createTopics(singleton(new NewTopic(topic, 2, (short) 1))).all().get();
 
             String[] args = buildArgsForGroup(GROUP, "--topic", topic + ":1", "--to-earliest", "--execute");
             ConsumerGroupCommand.ConsumerGroupService consumerGroupCommand = getConsumerGroupService(args);
@@ -369,7 +359,7 @@ public class ResetConsumerGroupOffsetTest {
             expectedOffsets.put(tp1, 0L);
             resetAndAssertOffsetsCommitted(consumerGroupCommand, expectedOffsets, topic);
 
-            admin.deleteTopics(Collections.singleton(topic)).all().get();
+            admin.deleteTopics(singleton(topic)).all().get();
         }
     }
 
@@ -378,10 +368,12 @@ public class ResetConsumerGroupOffsetTest {
         String topic1 = "topic1";
         String topic2 = "topic2";
         try (Admin admin = cluster.createAdminClient()) {
-            admin.createTopics(Arrays.asList(new NewTopic(topic1, 1, (short) 1),
+            admin.createTopics(asList(new NewTopic(topic1, 1, (short) 1),
                     new NewTopic(topic2, 1, (short) 1))).all().get();
 
-            String[] args = buildArgsForGroup(GROUP, "--topic", topic1, "--topic", topic2, "--to-earliest", "--execute");
+            String[] args = buildArgsForGroup(GROUP, "--topic", topic1,
+                "--topic", topic2,
+                "--to-earliest", "--execute");
             ConsumerGroupCommand.ConsumerGroupService consumerGroupCommand = getConsumerGroupService(args);
 
             produceConsumeAndShutdown(topic1, GROUP, 1);
@@ -398,7 +390,7 @@ public class ResetConsumerGroupOffsetTest {
             assertEquals(singletonMap(tp1, 0L), committedOffsets(topic1, GROUP));
             assertEquals(singletonMap(tp2, 0L), committedOffsets(topic2, GROUP));
 
-            admin.deleteTopics(Arrays.asList(topic1, topic2)).all().get();
+            admin.deleteTopics(asList(topic1, topic2)).all().get();
         }
     }
 
@@ -407,10 +399,13 @@ public class ResetConsumerGroupOffsetTest {
         String topic1 = "topic1";
         String topic2 = "topic2";
         try (Admin admin = cluster.createAdminClient()) {
-            admin.createTopics(Arrays.asList(new NewTopic(topic1, 2, (short) 1),
+            admin.createTopics(asList(new NewTopic(topic1, 2, (short) 1),
                     new NewTopic(topic2, 2, (short) 1))).all().get();
 
-            String[] args = buildArgsForGroup(GROUP, "--topic", topic1 + ":1", "--topic", topic2 + ":1", "--to-earliest", "--execute");
+            String[] args = buildArgsForGroup(GROUP,
+                "--topic", topic1 + ":1",
+                "--topic", topic2 + ":1",
+                "--to-earliest", "--execute");
             ConsumerGroupCommand.ConsumerGroupService consumerGroupCommand = getConsumerGroupService(args);
 
             produceConsumeAndShutdown(topic1, GROUP, 2);
@@ -431,18 +426,19 @@ public class ResetConsumerGroupOffsetTest {
             priorCommittedOffsets2.put(tp2, 0L);
             assertEquals(priorCommittedOffsets2, committedOffsets(topic2, GROUP));
 
-            admin.deleteTopics(Arrays.asList(topic1, topic2)).all().get();
+            admin.deleteTopics(asList(topic1, topic2)).all().get();
         }
     }
 
     @ClusterTest
-    // This one deals with old CSV export/import format for a single --group arg: "topic,partition,offset" to support old behavior
+    // This one deals with old CSV export/import format for a single --group arg:
+    // "topic,partition,offset" to support old behavior
     public void testResetOffsetsExportImportPlanSingleGroupArg() throws Exception {
         String topic = "bar";
         TopicPartition tp0 = new TopicPartition(topic, 0);
         TopicPartition tp1 = new TopicPartition(topic, 1);
         Admin admin = cluster.createAdminClient();
-        admin.createTopics(Collections.singleton(new NewTopic(topic, 2, (short) 1))).all().get();
+        admin.createTopics(singleton(new NewTopic(topic, 2, (short) 1))).all().get();
 
         String[] cgcArgs = buildArgsForGroup(GROUP, "--all-topics", "--to-offset", "2", "--export");
         ConsumerGroupCommand.ConsumerGroupService consumerGroupCommand = getConsumerGroupService(cgcArgs);
@@ -461,12 +457,13 @@ public class ResetConsumerGroupOffsetTest {
         exp1.put(tp1, 2L);
         assertEquals(exp1, toOffsetMap(exportedOffsets.get(GROUP)));
 
-        String[] cgcArgsExec = buildArgsForGroup(GROUP, "--all-topics", "--from-file", file.getCanonicalPath(), "--dry-run");
+        String[] cgcArgsExec = buildArgsForGroup(GROUP, "--all-topics",
+            "--from-file", file.getCanonicalPath(), "--dry-run");
         ConsumerGroupCommand.ConsumerGroupService consumerGroupCommandExec = getConsumerGroupService(cgcArgsExec);
         Map<String, Map<TopicPartition, OffsetAndMetadata>> importedOffsets = consumerGroupCommandExec.resetOffsets();
         assertEquals(exp1, toOffsetMap(importedOffsets.get(GROUP)));
 
-        admin.deleteTopics(Collections.singleton(topic));
+        admin.deleteTopics(singleton(topic));
     }
 
     @ClusterTest
@@ -482,11 +479,12 @@ public class ResetConsumerGroupOffsetTest {
         TopicPartition t2p0 = new TopicPartition(topic2, 0);
         TopicPartition t2p1 = new TopicPartition(topic2, 1);
         Admin admin = cluster.createAdminClient();
-        admin.createTopics(Arrays.asList(new NewTopic(topic1, 2, (short) 1),
+        admin.createTopics(asList(new NewTopic(topic1, 2, (short) 1),
                 new NewTopic(topic2, 2, (short) 1))).all().get();
 
 
-        String[] cgcArgs = buildArgsForGroups(Arrays.asList(group1, group2), "--all-topics", "--to-offset", "2", "--export");
+        String[] cgcArgs = buildArgsForGroups(asList(group1, group2),
+            "--all-topics", "--to-offset", "2", "--export");
         ConsumerGroupCommand.ConsumerGroupService consumerGroupCommand = getConsumerGroupService(cgcArgs);
 
         produceConsumeAndShutdown(topic1, group1, 1);
@@ -512,19 +510,21 @@ public class ResetConsumerGroupOffsetTest {
         assertEquals(exp2, toOffsetMap(exportedOffsets.get(group2)));
 
         // Multiple --group's offset import
-        String[] cgcArgsExec = buildArgsForGroups(Arrays.asList(group1, group2), "--all-topics", "--from-file", file.getCanonicalPath(), "--dry-run");
+        String[] cgcArgsExec = buildArgsForGroups(asList(group1, group2), "--all-topics",
+            "--from-file", file.getCanonicalPath(), "--dry-run");
         ConsumerGroupCommand.ConsumerGroupService consumerGroupCommandExec = getConsumerGroupService(cgcArgsExec);
         Map<String, Map<TopicPartition, OffsetAndMetadata>> importedOffsets = consumerGroupCommandExec.resetOffsets();
         assertEquals(exp1, toOffsetMap(importedOffsets.get(group1)));
         assertEquals(exp2, toOffsetMap(importedOffsets.get(group2)));
 
         // Single --group offset import using "group,topic,partition,offset" csv format
-        String[] cgcArgsExec2 = buildArgsForGroup(group1, "--all-topics", "--from-file", file.getCanonicalPath(), "--dry-run");
+        String[] cgcArgsExec2 = buildArgsForGroup(group1, "--all-topics",
+            "--from-file", file.getCanonicalPath(), "--dry-run");
         ConsumerGroupCommand.ConsumerGroupService consumerGroupCommandExec2 = getConsumerGroupService(cgcArgsExec2);
         Map<String, Map<TopicPartition, OffsetAndMetadata>> importedOffsets2 = consumerGroupCommandExec2.resetOffsets();
         assertEquals(exp1, toOffsetMap(importedOffsets2.get(group1)));
 
-        admin.deleteTopics(Arrays.asList(topic1, topic2));
+        admin.deleteTopics(asList(topic1, topic2));
     }
 
     @ClusterTest
@@ -635,24 +635,23 @@ public class ResetConsumerGroupOffsetTest {
 
     private void produceConsumeAndShutdown(String topic, String group, int numConsumers) throws Exception {
         produceMessages(topic, 100);
-        ConsumerGroupExecutor executor = addConsumerGroupExecutor(numConsumers, topic, group, GroupProtocol.CLASSIC.name);
-        awaitConsumerProgress(topic, group, 100);
-        executor.shutdown();
+        try (AutoCloseable ignored = addConsumerGroupExecutor(numConsumers, topic, group, GroupProtocol.CLASSIC.name)) {
+            awaitConsumerProgress(topic, group, 100);
+        }
     }
 
-    ConsumerGroupExecutor addConsumerGroupExecutor(int numConsumers,
+    AutoCloseable addConsumerGroupExecutor(int numConsumers,
                                                    String topic,
                                                    String group,
                                                    String groupProtocol) {
-        return new ConsumerGroupExecutor(
+        return ConsumerGroupExecutor.buildConsumerGroup(
                 cluster.bootstrapServers(),
                 numConsumers,
                 group,
-                groupProtocol,
                 topic,
-                RangeAssignor.class.getName(),
+                groupProtocol,
                 Optional.empty(),
-                Optional.empty(),
+                new HashMap<>(),
                 false);
     }
 
@@ -704,156 +703,8 @@ public class ResetConsumerGroupOffsetTest {
     }
 
     private String[] addTo(String[] args, String... extra) {
-        List<String> res = new ArrayList<>(Arrays.asList(args));
-        res.addAll(Arrays.asList(extra));
+        List<String> res = new ArrayList<>(asList(args));
+        res.addAll(asList(extra));
         return res.toArray(new String[0]);
-    }
-
-    private static class AbstractConsumerGroupExecutor {
-        final int numThreads;
-        final ExecutorService executor;
-        final List<AbstractConsumerRunnable> consumers = new ArrayList<>();
-
-        public AbstractConsumerGroupExecutor(int numThreads) {
-            this.numThreads = numThreads;
-            this.executor = Executors.newFixedThreadPool(numThreads);
-        }
-
-        void submit(AbstractConsumerRunnable consumerThread) {
-            consumers.add(consumerThread);
-            executor.submit(consumerThread);
-        }
-
-        void shutdown() {
-            consumers.forEach(AbstractConsumerRunnable::shutdown);
-            executor.shutdown();
-            try {
-                executor.awaitTermination(5000, TimeUnit.MILLISECONDS);
-            } catch (InterruptedException e) {
-                throw new RuntimeException(e);
-            }
-        }
-    }
-
-    private static class ConsumerGroupExecutor extends AbstractConsumerGroupExecutor {
-        public ConsumerGroupExecutor(String broker,
-                                     int numConsumers,
-                                     String groupId,
-                                     String groupProtocol,
-                                     String topic,
-                                     String strategy,
-                                     Optional<String> remoteAssignor,
-                                     Optional<Properties> customPropsOpt,
-                                     boolean syncCommit) {
-            super(numConsumers);
-            IntStream.rangeClosed(1, numConsumers).forEach(i -> {
-                ConsumerRunnable th = new ConsumerRunnable(broker,
-                        groupId,
-                        groupProtocol,
-                        topic,
-                        strategy,
-                        remoteAssignor,
-                        customPropsOpt,
-                        syncCommit);
-                th.configure();
-                submit(th);
-            });
-        }
-    }
-
-    private static abstract class AbstractConsumerRunnable implements Runnable {
-        final String broker;
-        final String groupId;
-        final Optional<Properties> customPropsOpt;
-        final boolean syncCommit;
-
-        final Properties props = new Properties();
-        KafkaConsumer<String, String> consumer;
-
-        boolean configured = false;
-
-        public AbstractConsumerRunnable(String broker,
-                                        String groupId,
-                                        Optional<Properties> customPropsOpt,
-                                        boolean syncCommit) {
-            this.broker = broker;
-            this.groupId = groupId;
-            this.customPropsOpt = customPropsOpt;
-            this.syncCommit = syncCommit;
-        }
-
-        void configure() {
-            configured = true;
-            configure(props);
-            customPropsOpt.ifPresent(props::putAll);
-            consumer = new KafkaConsumer<>(props);
-        }
-
-        void configure(Properties props) {
-            props.put(BOOTSTRAP_SERVERS_CONFIG, broker);
-            props.put(GROUP_ID_CONFIG, groupId);
-            props.put(KEY_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class.getName());
-            props.put(VALUE_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class.getName());
-        }
-
-        abstract void subscribe();
-
-        @Override
-        public void run() {
-            assert configured : "Must call configure before use";
-            try {
-                subscribe();
-                while (true) {
-                    consumer.poll(Duration.ofMillis(Long.MAX_VALUE));
-                    if (syncCommit) consumer.commitSync();
-                }
-            } catch (WakeupException e) {
-                // OK
-            } finally {
-                consumer.close();
-            }
-        }
-
-        void shutdown() {
-            consumer.wakeup();
-        }
-    }
-
-    private static class ConsumerRunnable extends AbstractConsumerRunnable {
-        final String topic;
-        final String groupProtocol;
-        final String strategy;
-        final Optional<String> remoteAssignor;
-
-        public ConsumerRunnable(String broker,
-                                String groupId,
-                                String groupProtocol,
-                                String topic,
-                                String strategy,
-                                Optional<String> remoteAssignor,
-                                Optional<Properties> customPropsOpt,
-                                boolean syncCommit) {
-            super(broker, groupId, customPropsOpt, syncCommit);
-            this.topic = topic;
-            this.groupProtocol = groupProtocol;
-            this.strategy = strategy;
-            this.remoteAssignor = remoteAssignor;
-        }
-
-        @Override
-        void configure(Properties props) {
-            super.configure(props);
-            props.put(ConsumerConfig.GROUP_PROTOCOL_CONFIG, groupProtocol);
-            if (groupProtocol.toUpperCase(Locale.ROOT).equals(GroupProtocol.CONSUMER.toString())) {
-                remoteAssignor.ifPresent(assignor -> props.put(GROUP_REMOTE_ASSIGNOR_CONFIG, assignor));
-            } else {
-                props.put(PARTITION_ASSIGNMENT_STRATEGY_CONFIG, strategy);
-            }
-        }
-
-        @Override
-        void subscribe() {
-            consumer.subscribe(Collections.singleton(topic));
-        }
     }
 }
