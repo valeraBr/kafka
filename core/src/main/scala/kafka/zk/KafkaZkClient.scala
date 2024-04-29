@@ -60,8 +60,12 @@ case class SuccessfulRegistrationResult(zkControllerEpoch: Int, controllerEpochZ
  * easier to migrate away from `ZkUtils` (since removed). We should revisit this. We should also consider whether a
  * monolithic [[kafka.zk.ZkData]] is the way to go.
  */
-class KafkaZkClient private[zk] (zooKeeperClient: ZooKeeperClient, isSecure: Boolean, time: Time) extends AutoCloseable with
-  Logging {
+class KafkaZkClient private[zk] (
+  zooKeeperClient: ZooKeeperClient,
+  isSecure: Boolean,
+  time: Time,
+  enableEntityConfigNoController: Boolean
+) extends AutoCloseable with Logging {
 
   private val metricsGroup: KafkaMetricsGroup = new KafkaMetricsGroup(this.getClass) {
     override def metricName(name: String, metricTags: util.Map[String, String]): MetricName = {
@@ -459,6 +463,9 @@ class KafkaZkClient private[zk] (zooKeeperClient: ZooKeeperClient, isSecure: Boo
    * Sets or creates the entity znode path with the given configs depending
    * on whether it already exists or not.
    *
+   * This method requires that a ZK controller is defined. This is done to prevent configs from being
+   * created or modified while the ZK to KRaft migration is taking place.
+   *
    * If this is method is called concurrently, the last writer wins. In cases where we update configs and then
    * partition assignment (i.e. create topic), it's possible for one thread to set this and the other to set the
    * partition assignment. As such, the recommendation is to never call create topic for the same topic with different
@@ -467,13 +474,42 @@ class KafkaZkClient private[zk] (zooKeeperClient: ZooKeeperClient, isSecure: Boo
    * @param rootEntityType entity type
    * @param sanitizedEntityName entity name
    * @throws KeeperException if there is an error while setting or creating the znode
+   * @throws ControllerMovedException if no controller is defined, or a KRaft controller is defined
    */
   def setOrCreateEntityConfigs(rootEntityType: String, sanitizedEntityName: String, config: Properties): Unit = {
+    val controllerZkVersion = if (!enableEntityConfigNoController) {
+      val controllerRegistration = getControllerRegistration match {
+        case Some(registration) => registration
+        case None =>
+          // This case is mainly here to make tests less flaky (by virtue of retries).
+          // In practice, we always expect a /controller ZNode to exist
+          throw new ControllerMovedException(s"Cannot set entity configs when there is no controller.")
+      }
+
+      // If there is a KRaft controller defined, don't even attempt this write. The broker will soon get a UMR
+      // from the new KRaft controller that lets it know about the new controller. It will then forward
+      // IncrementalAlterConfig requests instead of processing directly.
+      if (controllerRegistration.kraftEpoch.exists(epoch => epoch > 0)) {
+        throw new ControllerMovedException(s"Cannot set entity configs directly when there is a KRaft controller.")
+      }
+
+      controllerRegistration.zkVersion
+    } else {
+      logger.warn("Setting entity configs without any checks on the controller.")
+      ZkVersion.MatchAnyVersion
+    }
 
     def set(configData: Array[Byte]): SetDataResponse = {
-      val setDataRequest = SetDataRequest(ConfigEntityZNode.path(rootEntityType, sanitizedEntityName),
-        configData, ZkVersion.MatchAnyVersion)
-      retryRequestUntilConnected(setDataRequest)
+      // Since we're guarding against the controller switching to KRaft, we need to check that the controller hasn't
+      // changed during this method. We do that here by adding a CheckOp on the controller ZNode. The reason we
+      // don't use the controller epoch zkVersion here is that we can't consistently read the controller and
+      // controller epoch. This does _not_ guard against the existing "last writer wins" behavior of this method.
+      val multi = MultiRequest(Seq(
+        CheckOp(ControllerZNode.path, controllerZkVersion),
+        SetDataOp(ConfigEntityZNode.path(rootEntityType, sanitizedEntityName), configData, ZkVersion.MatchAnyVersion)
+      ))
+      val results = retryRequestUntilConnected(multi)
+      unwrapResponseWithControllerEpochCheck(results).asInstanceOf[SetDataResponse]
     }
 
     def createOrSet(configData: Array[Byte]): Unit = {
@@ -2230,7 +2266,8 @@ object KafkaZkClient {
             zkClientConfig: ZKClientConfig,
             metricGroup: String = "kafka.server",
             metricType: String = "SessionExpireListener",
-            createChrootIfNecessary: Boolean = false
+            createChrootIfNecessary: Boolean = false,
+            enableEntityConfigNoController: Boolean = false
   ): KafkaZkClient = {
 
     /* ZooKeeper 3.6.0 changed the default configuration for JUTE_MAXBUFFER from 4 MB to 1 MB.
@@ -2265,7 +2302,7 @@ object KafkaZkClient {
     }
     val zooKeeperClient = new ZooKeeperClient(connectString, sessionTimeoutMs, connectionTimeoutMs, maxInFlightRequests,
       time, metricGroup, metricType, zkClientConfig, name)
-    new KafkaZkClient(zooKeeperClient, isSecure, time)
+    new KafkaZkClient(zooKeeperClient, isSecure, time, enableEntityConfigNoController)
   }
 
   // A helper function to transform a regular request into a MultiRequest
