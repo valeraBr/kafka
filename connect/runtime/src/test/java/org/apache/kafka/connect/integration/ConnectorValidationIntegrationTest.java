@@ -20,7 +20,7 @@ import org.apache.kafka.common.config.ConfigDef;
 import org.apache.kafka.common.utils.Utils;
 import org.apache.kafka.connect.data.Schema;
 import org.apache.kafka.connect.data.SchemaAndValue;
-import org.apache.kafka.connect.errors.ConnectException;
+import org.apache.kafka.connect.runtime.isolation.TestPlugins;
 import org.apache.kafka.connect.storage.Converter;
 import org.apache.kafka.connect.storage.HeaderConverter;
 import org.apache.kafka.connect.storage.StringConverter;
@@ -331,7 +331,7 @@ public class ConnectorValidationIntegrationTest {
     @Test
     public void testConnectorHasConverterWithNoSuitableConstructor() throws InterruptedException {
         Map<String, String> config = defaultSinkConnectorProps();
-        config.put(KEY_CONVERTER_CLASS_CONFIG, TestConverterWithPrivateConstructor.class.getName());
+        config.put(KEY_CONVERTER_CLASS_CONFIG, TestPlugins.TestPlugin.BAD_PACKAGING_DEFAULT_CONSTRUCTOR_PRIVATE_CONNECTOR.className());
         connect.assertions().assertExactlyNumErrorsOnConnectorConfigValidation(
                 config.get(CONNECTOR_CLASS_CONFIG),
                 config,
@@ -343,7 +343,7 @@ public class ConnectorValidationIntegrationTest {
     @Test
     public void testConnectorHasConverterThatThrowsExceptionOnInstantiation() throws InterruptedException {
         Map<String, String> config = defaultSinkConnectorProps();
-        config.put(KEY_CONVERTER_CLASS_CONFIG, TestConverterWithConstructorThatThrowsException.class.getName());
+        config.put(KEY_CONVERTER_CLASS_CONFIG, TestPlugins.TestPlugin.BAD_PACKAGING_DEFAULT_CONSTRUCTOR_THROWS_CONNECTOR.className());
         connect.assertions().assertExactlyNumErrorsOnConnectorConfigValidation(
                 config.get(CONNECTOR_CLASS_CONFIG),
                 config,
@@ -392,7 +392,7 @@ public class ConnectorValidationIntegrationTest {
     @Test
     public void testConnectorHasHeaderConverterWithNoSuitableConstructor() throws InterruptedException {
         Map<String, String> config = defaultSinkConnectorProps();
-        config.put(HEADER_CONVERTER_CLASS_CONFIG, TestConverterWithPrivateConstructor.class.getName());
+        config.put(HEADER_CONVERTER_CLASS_CONFIG, TestPlugins.TestPlugin.BAD_PACKAGING_DEFAULT_CONSTRUCTOR_PRIVATE_CONNECTOR.className());
         connect.assertions().assertExactlyNumErrorsOnConnectorConfigValidation(
                 config.get(CONNECTOR_CLASS_CONFIG),
                 config,
@@ -404,7 +404,7 @@ public class ConnectorValidationIntegrationTest {
     @Test
     public void testConnectorHasHeaderConverterThatThrowsExceptionOnInstantiation() throws InterruptedException {
         Map<String, String> config = defaultSinkConnectorProps();
-        config.put(HEADER_CONVERTER_CLASS_CONFIG, TestConverterWithConstructorThatThrowsException.class.getName());
+        config.put(HEADER_CONVERTER_CLASS_CONFIG, TestPlugins.TestPlugin.BAD_PACKAGING_DEFAULT_CONSTRUCTOR_THROWS_CONNECTOR.className());
         connect.assertions().assertExactlyNumErrorsOnConnectorConfigValidation(
                 config.get(CONNECTOR_CLASS_CONFIG),
                 config,
@@ -457,17 +457,6 @@ public class ConnectorValidationIntegrationTest {
     }
 
     public static abstract class AbstractTestConverter extends TestConverter {
-    }
-
-    public static class TestConverterWithPrivateConstructor extends TestConverter {
-        private TestConverterWithPrivateConstructor() {
-        }
-    }
-
-    public static class TestConverterWithConstructorThatThrowsException extends TestConverter {
-        public TestConverterWithConstructorThatThrowsException() {
-            throw new ConnectException("whoops");
-        }
     }
 
     private Map<String, String> defaultSourceConnectorProps() {
