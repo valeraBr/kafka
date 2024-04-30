@@ -132,7 +132,7 @@ public class RecordCollectorTest {
     private final UUID processId = UUID.randomUUID();
 
     private final StreamPartitioner<String, Object> streamPartitioner =
-        (topic, key, value, numPartitions) -> Integer.parseInt(key) % numPartitions;
+        (topic, key, value, numPartitions) -> Optional.of(Collections.singleton(Integer.parseInt(key) % numPartitions));
 
     private MockProducer<byte[], byte[]> mockProducer;
     private StreamsProducer streamsProducer;
@@ -302,13 +302,6 @@ public class RecordCollectorTest {
     @Test
     public void shouldSendOnlyToEvenPartitions() {
         class EvenPartitioner implements StreamPartitioner<String, Object> {
-
-            @Override
-            @Deprecated
-            public Integer partition(final String topic, final String key, final Object value, final int numPartitions) {
-                return null;
-            }
-
             @Override
             public Optional<Set<Integer>> partitions(final String topic, final String key, final Object value, final int numPartitions) {
                 final Set<Integer> partitions = new HashSet<>();
@@ -374,13 +367,6 @@ public class RecordCollectorTest {
     public void shouldBroadcastToAllPartitions() {
 
         class BroadcastingPartitioner implements StreamPartitioner<String, Object> {
-
-            @Override
-            @Deprecated
-            public Integer partition(final String topic, final String key, final Object value, final int numPartitions) {
-                return null;
-            }
-
             @Override
             public Optional<Set<Integer>> partitions(final String topic, final String key, final Object value, final int numPartitions) {
                 return Optional.of(IntStream.range(0, numPartitions).boxed().collect(Collectors.toSet()));
@@ -442,13 +428,6 @@ public class RecordCollectorTest {
     public void shouldDropAllRecords() {
 
         class DroppingPartitioner implements StreamPartitioner<String, Object> {
-
-            @Override
-            @Deprecated
-            public Integer partition(final String topic, final String key, final Object value, final int numPartitions) {
-                return null;
-            }
-
             @Override
             public Optional<Set<Integer>> partitions(final String topic, final String key, final Object value, final int numPartitions) {
                 return Optional.of(Collections.emptySet());
@@ -522,13 +501,6 @@ public class RecordCollectorTest {
     public void shouldUseDefaultPartitionerViaPartitions() {
 
         class DefaultPartitioner implements StreamPartitioner<String, Object> {
-
-            @Override
-            @Deprecated
-            public Integer partition(final String topic, final String key, final Object value, final int numPartitions) {
-                return null;
-            }
-
             @Override
             public Optional<Set<Integer>> partitions(final String topic, final String key, final Object value, final int numPartitions) {
                 return Optional.empty();
