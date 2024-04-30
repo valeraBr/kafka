@@ -1541,6 +1541,36 @@ class KRaftClusterTest {
       cluster.close()
     }
   }
+
+  @Test
+  def testReduceNumNetworkThreads(): Unit = {
+    val cluster = new KafkaClusterTestKit.Builder(
+      new TestKitNodes.Builder().
+        setNumBrokerNodes(1).
+        setNumControllerNodes(1).build()).
+      setConfigProp(KafkaConfig.NumNetworkThreadsProp, "4").
+      build()
+    try {
+      cluster.format()
+      cluster.startup()
+      cluster.waitForReadyBrokers()
+      val admin = Admin.create(cluster.clientProperties())
+      try {
+        admin.incrementalAlterConfigs(
+          Collections.singletonMap(new ConfigResource(Type.BROKER, ""),
+            Collections.singletonList(new AlterConfigOp(
+              new ConfigEntry(KafkaConfig.NumNetworkThreadsProp, "2"), OpType.SET)))).all().get()
+        val newTopic = Collections.singletonList(new NewTopic("test-topic", 1, 1.toShort))
+        val createTopicResult = admin.createTopics(newTopic)
+        createTopicResult.all().get()
+        waitForTopicListing(admin, Seq("test-topic"), Seq())
+      } finally {
+        admin.close()
+      }
+    } finally {
+      cluster.close()
+    }
+  }
 }
 
 class BadAuthorizer extends Authorizer {
