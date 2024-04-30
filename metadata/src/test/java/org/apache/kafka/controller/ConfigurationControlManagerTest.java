@@ -20,17 +20,21 @@ package org.apache.kafka.controller;
 import org.apache.kafka.clients.admin.AlterConfigOp;
 import org.apache.kafka.common.config.ConfigDef;
 import org.apache.kafka.common.config.ConfigResource;
+import org.apache.kafka.common.config.TopicConfig;
 import org.apache.kafka.common.errors.PolicyViolationException;
 import org.apache.kafka.common.errors.UnknownTopicOrPartitionException;
 import org.apache.kafka.common.metadata.ConfigRecord;
 import org.apache.kafka.common.protocol.Errors;
 import org.apache.kafka.common.requests.ApiError;
-import org.apache.kafka.server.config.ConfigSynonym;
 import org.apache.kafka.metadata.KafkaConfigSchema;
 import org.apache.kafka.metadata.RecordTestUtils;
 import org.apache.kafka.server.common.ApiMessageAndVersion;
+import org.apache.kafka.server.config.ConfigSynonym;
 import org.apache.kafka.server.policy.AlterConfigPolicy;
 import org.apache.kafka.server.policy.AlterConfigPolicy.RequestMetadata;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.Timeout;
+import org.mockito.ArgumentMatchers;
 
 import java.util.AbstractMap.SimpleImmutableEntry;
 import java.util.Arrays;
@@ -44,9 +48,6 @@ import java.util.Optional;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Consumer;
 
-import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.Timeout;
-
 import static java.util.Arrays.asList;
 import static org.apache.kafka.clients.admin.AlterConfigOp.OpType.APPEND;
 import static org.apache.kafka.clients.admin.AlterConfigOp.OpType.DELETE;
@@ -58,6 +59,9 @@ import static org.apache.kafka.common.metadata.MetadataRecordType.CONFIG_RECORD;
 import static org.apache.kafka.server.config.ConfigSynonym.HOURS_TO_MILLISECONDS;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
 
 
 @Timeout(value = 40)
@@ -74,7 +78,8 @@ public class ConfigurationControlManagerTest {
             define("abc", ConfigDef.Type.LIST, ConfigDef.Importance.HIGH, "abc").
             define("def", ConfigDef.Type.STRING, ConfigDef.Importance.HIGH, "def").
             define("ghi", ConfigDef.Type.BOOLEAN, true, ConfigDef.Importance.HIGH, "ghi").
-            define("quuux", ConfigDef.Type.LONG, ConfigDef.Importance.HIGH, "quux"));
+            define("quuux", ConfigDef.Type.LONG, ConfigDef.Importance.HIGH, "quux").
+            define(TopicConfig.MIN_IN_SYNC_REPLICAS_CONFIG, ConfigDef.Type.INT, ConfigDef.Importance.HIGH, ""));
     }
 
     public static final Map<String, List<ConfigSynonym>> SYNONYMS = new HashMap<>();
@@ -83,6 +88,7 @@ public class ConfigurationControlManagerTest {
         SYNONYMS.put("abc", Arrays.asList(new ConfigSynonym("foo.bar")));
         SYNONYMS.put("def", Arrays.asList(new ConfigSynonym("baz")));
         SYNONYMS.put("quuux", Arrays.asList(new ConfigSynonym("quux", HOURS_TO_MILLISECONDS)));
+        SYNONYMS.put(TopicConfig.MIN_IN_SYNC_REPLICAS_CONFIG, Arrays.asList(new ConfigSynonym(TopicConfig.MIN_IN_SYNC_REPLICAS_CONFIG)));
     }
 
     static final KafkaConfigSchema SCHEMA = new KafkaConfigSchema(CONFIGS, SYNONYMS);
@@ -102,7 +108,7 @@ public class ConfigurationControlManagerTest {
     }
 
     @SuppressWarnings("unchecked")
-    private static <A, B> Map<A, B> toMap(Entry... entries) {
+    static <A, B> Map<A, B> toMap(Entry... entries) {
         Map<A, B> map = new LinkedHashMap<>();
         for (Entry<A, B> entry : entries) {
             map.put(entry.getKey(), entry.getValue());
@@ -117,6 +123,9 @@ public class ConfigurationControlManagerTest {
     @Test
     public void testReplay() throws Exception {
         ConfigurationControlManager manager = new ConfigurationControlManager.Builder().
+            setMinIsrConfigUpdatePartitionHandler((t, f) -> {
+                return Collections.emptyList();
+            }).
             setKafkaConfigSchema(SCHEMA).
             build();
         assertEquals(Collections.emptyMap(), manager.getConfigs(BROKER0));
@@ -144,6 +153,9 @@ public class ConfigurationControlManagerTest {
     @Test
     public void testIncrementalAlterConfigs() {
         ConfigurationControlManager manager = new ConfigurationControlManager.Builder().
+            setMinIsrConfigUpdatePartitionHandler((t, f) -> {
+                return Collections.emptyList();
+            }).
             setKafkaConfigSchema(SCHEMA).
             build();
 
@@ -175,6 +187,9 @@ public class ConfigurationControlManagerTest {
     @Test
     public void testIncrementalAlterConfig() {
         ConfigurationControlManager manager = new ConfigurationControlManager.Builder().
+            setMinIsrConfigUpdatePartitionHandler((t, f) -> {
+                return Collections.emptyList();
+            }).
             setKafkaConfigSchema(SCHEMA).
             build();
         Map<String, Entry<AlterConfigOp.OpType, String>> keyToOps = toMap(entry("abc", entry(APPEND, "123")));
@@ -199,6 +214,9 @@ public class ConfigurationControlManagerTest {
     @Test
     public void testIncrementalAlterMultipleConfigValues() {
         ConfigurationControlManager manager = new ConfigurationControlManager.Builder().
+            setMinIsrConfigUpdatePartitionHandler((t, f) -> {
+                return Collections.emptyList();
+            }).
             setKafkaConfigSchema(SCHEMA).
             build();
 
@@ -246,6 +264,9 @@ public class ConfigurationControlManagerTest {
     public void testIncrementalAlterConfigsWithoutExistence() {
         ConfigurationControlManager manager = new ConfigurationControlManager.Builder().
             setKafkaConfigSchema(SCHEMA).
+            setMinIsrConfigUpdatePartitionHandler((t, f) -> {
+                return Collections.emptyList();
+            }).
             setExistenceChecker(TestExistenceChecker.INSTANCE).
             build();
         ConfigResource existingTopic = new ConfigResource(TOPIC, "ExistingTopic");
@@ -307,6 +328,9 @@ public class ConfigurationControlManagerTest {
                 entry("broker.config.to.remove", null)))));
         ConfigurationControlManager manager = new ConfigurationControlManager.Builder().
             setKafkaConfigSchema(SCHEMA).
+            setMinIsrConfigUpdatePartitionHandler((t, f) -> {
+                return Collections.emptyList();
+            }).
             setAlterConfigPolicy(Optional.of(policy)).
             build();
         // Existing configs should not be passed to the policy
@@ -365,6 +389,9 @@ public class ConfigurationControlManagerTest {
     public void testLegacyAlterConfigs() {
         ConfigurationControlManager manager = new ConfigurationControlManager.Builder().
             setKafkaConfigSchema(SCHEMA).
+            setMinIsrConfigUpdatePartitionHandler((t, f) -> {
+                return Collections.emptyList();
+            }).
             setAlterConfigPolicy(Optional.of(new CheckForNullValuesPolicy())).
             build();
         List<ApiMessageAndVersion> expectedRecords1 = asList(
@@ -393,5 +420,94 @@ public class ConfigurationControlManagerTest {
             toMap(entry(MYTOPIC, ApiError.NONE))),
             manager.legacyAlterConfigs(toMap(entry(MYTOPIC, toMap(entry("def", "901")))),
                 true));
+    }
+
+    @Test
+    public void testIncrementalAlterConfigsOnMinIsrUpdate() {
+        ReplicationControlManager replicationControlManager = mock(ReplicationControlManager.class);
+        ConfigurationControlManager manager = new ConfigurationControlManager.Builder().
+            setKafkaConfigSchema(SCHEMA).
+            setMinIsrConfigUpdatePartitionHandler((topicNames, getTopicMinIsrConfig) -> {
+                return replicationControlManager.getPartitionElrUpdatesForConfigChanges(topicNames, getTopicMinIsrConfig);
+            }).
+            build();
+
+        ControllerResult<Map<ConfigResource, ApiError>> result =
+            manager.incrementalAlterConfigs(toMap(entry(BROKER0, toMap(
+                entry(TopicConfig.MIN_IN_SYNC_REPLICAS_CONFIG, entry(SET, "2"))))),
+                true
+            );
+        List<ApiMessageAndVersion> records = result.records();
+        assertEquals(1, records.size());
+        manager.replay((ConfigRecord) result.records().get(0).message());
+
+        result = manager.incrementalAlterConfigs(toMap(entry(MYTOPIC, toMap(
+            entry(TopicConfig.MIN_IN_SYNC_REPLICAS_CONFIG, entry(SET, "2"))))),
+            true);
+        records = result.records();
+        assertEquals(1, records.size());
+        manager.replay((ConfigRecord) result.records().get(0).message());
+
+        result = manager.incrementalAlterConfigs(toMap(entry(new ConfigResource(BROKER, ""), toMap(
+            entry(TopicConfig.MIN_IN_SYNC_REPLICAS_CONFIG, entry(SET, "2"))))),
+            true);
+        records = result.records();
+        assertEquals(1, records.size());
+        manager.replay((ConfigRecord) result.records().get(0).message());
+
+        result = manager.incrementalAlterConfigs(toMap(entry(MYTOPIC, toMap(
+            entry(TopicConfig.MIN_IN_SYNC_REPLICAS_CONFIG, entry(DELETE, ""))))),
+            false);
+        records = result.records();
+        assertEquals(1, records.size());
+        manager.replay((ConfigRecord) result.records().get(0).message());
+
+        verify(replicationControlManager, times(2)).getPartitionElrUpdatesForConfigChanges(ArgumentMatchers.eq(Collections.emptyList()), ArgumentMatchers.any());
+        verify(replicationControlManager, times(2)).getPartitionElrUpdatesForConfigChanges(ArgumentMatchers.eq(Arrays.asList(MYTOPIC.name())), ArgumentMatchers.any());
+    }
+
+    @Test
+    public void testLegacyAlterConfigsOnMinIsrUpdate() {
+        ReplicationControlManager replicationControlManager = mock(ReplicationControlManager.class);
+        ConfigurationControlManager manager = new ConfigurationControlManager.Builder().
+            setKafkaConfigSchema(SCHEMA).
+            setMinIsrConfigUpdatePartitionHandler((topicNames, getTopicMinIsrConfig) -> {
+                return replicationControlManager.getPartitionElrUpdatesForConfigChanges(topicNames, getTopicMinIsrConfig);
+            }).
+            setAlterConfigPolicy(Optional.of(new CheckForNullValuesPolicy())).
+            build();
+
+        ControllerResult<Map<ConfigResource, ApiError>> result =
+            manager.legacyAlterConfigs(toMap(entry(BROKER0, toMap(
+                entry(TopicConfig.MIN_IN_SYNC_REPLICAS_CONFIG, "2")))),
+                true
+            );
+        List<ApiMessageAndVersion> records = result.records();
+        assertEquals(1, records.size());
+        manager.replay((ConfigRecord) result.records().get(0).message());
+
+        result = manager.legacyAlterConfigs(toMap(entry(MYTOPIC, toMap(
+            entry(TopicConfig.MIN_IN_SYNC_REPLICAS_CONFIG, "2")))),
+            true);
+        records = result.records();
+        assertEquals(1, records.size());
+        manager.replay((ConfigRecord) result.records().get(0).message());
+
+        result = manager.legacyAlterConfigs(toMap(entry(new ConfigResource(BROKER, ""), toMap(
+            entry(TopicConfig.MIN_IN_SYNC_REPLICAS_CONFIG, "2")))),
+            true);
+        records = result.records();
+        assertEquals(1, records.size());
+        manager.replay((ConfigRecord) result.records().get(0).message());
+
+        result = manager.legacyAlterConfigs(toMap(entry(MYTOPIC, toMap(
+            entry(TopicConfig.MIN_IN_SYNC_REPLICAS_CONFIG, "")))),
+            false);
+        records = result.records();
+        assertEquals(1, records.size());
+        manager.replay((ConfigRecord) result.records().get(0).message());
+
+        verify(replicationControlManager, times(2)).getPartitionElrUpdatesForConfigChanges(ArgumentMatchers.eq(Collections.emptyList()), ArgumentMatchers.any());
+        verify(replicationControlManager, times(2)).getPartitionElrUpdatesForConfigChanges(ArgumentMatchers.eq(Arrays.asList(MYTOPIC.name())), ArgumentMatchers.any());
     }
 }

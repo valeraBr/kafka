@@ -20,10 +20,12 @@ package org.apache.kafka.controller;
 import org.apache.kafka.clients.admin.AlterConfigOp.OpType;
 import org.apache.kafka.clients.admin.ConfigEntry;
 import org.apache.kafka.common.config.ConfigException;
-import org.apache.kafka.common.config.ConfigResource.Type;
 import org.apache.kafka.common.config.ConfigResource;
+import org.apache.kafka.common.config.ConfigResource.Type;
+import org.apache.kafka.common.config.TopicConfig;
 import org.apache.kafka.common.config.types.Password;
 import org.apache.kafka.common.metadata.ConfigRecord;
+import org.apache.kafka.common.metadata.MetadataRecordType;
 import org.apache.kafka.common.protocol.Errors;
 import org.apache.kafka.common.requests.ApiError;
 import org.apache.kafka.common.utils.LogContext;
@@ -48,6 +50,7 @@ import java.util.NoSuchElementException;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.function.Consumer;
+import java.util.function.Function;
 
 import static org.apache.kafka.clients.admin.AlterConfigOp.OpType.APPEND;
 import static org.apache.kafka.common.protocol.Errors.INVALID_CONFIG;
@@ -66,6 +69,7 @@ public class ConfigurationControlManager {
     private final TimelineHashMap<ConfigResource, TimelineHashMap<String, String>> configData;
     private final Map<String, Object> staticConfig;
     private final ConfigResource currentController;
+    private final MinIsrConfigUpdatePartitionHandler minIsrConfigUpdatePartitionHandler;
 
     static class Builder {
         private LogContext logContext = null;
@@ -75,6 +79,7 @@ public class ConfigurationControlManager {
         private Optional<AlterConfigPolicy> alterConfigPolicy = Optional.empty();
         private ConfigurationValidator validator = ConfigurationValidator.NO_OP;
         private Map<String, Object> staticConfig = Collections.emptyMap();
+        private MinIsrConfigUpdatePartitionHandler minIsrConfigUpdatePartitionHandler;
         private int nodeId = 0;
 
         Builder setLogContext(LogContext logContext) {
@@ -117,9 +122,19 @@ public class ConfigurationControlManager {
             return this;
         }
 
+        Builder setMinIsrConfigUpdatePartitionHandler(
+            MinIsrConfigUpdatePartitionHandler minIsrConfigUpdatePartitionHandler
+        ) {
+            this.minIsrConfigUpdatePartitionHandler = minIsrConfigUpdatePartitionHandler;
+            return this;
+        }
+
         ConfigurationControlManager build() {
             if (logContext == null) logContext = new LogContext();
             if (snapshotRegistry == null) snapshotRegistry = new SnapshotRegistry(logContext);
+            if (minIsrConfigUpdatePartitionHandler == null) {
+                throw new RuntimeException("You must specify MinIsrConfigUpdatePartitionHandler");
+            }
             return new ConfigurationControlManager(
                 logContext,
                 snapshotRegistry,
@@ -128,7 +143,8 @@ public class ConfigurationControlManager {
                 alterConfigPolicy,
                 validator,
                 staticConfig,
-                nodeId);
+                nodeId,
+                minIsrConfigUpdatePartitionHandler);
         }
     }
 
@@ -139,7 +155,9 @@ public class ConfigurationControlManager {
             Optional<AlterConfigPolicy> alterConfigPolicy,
             ConfigurationValidator validator,
             Map<String, Object> staticConfig,
-            int nodeId) {
+            int nodeId,
+            MinIsrConfigUpdatePartitionHandler minIsrConfigUpdatePartitionHandler
+    ) {
         this.log = logContext.logger(ConfigurationControlManager.class);
         this.snapshotRegistry = snapshotRegistry;
         this.configSchema = configSchema;
@@ -149,6 +167,7 @@ public class ConfigurationControlManager {
         this.configData = new TimelineHashMap<>(snapshotRegistry, 0);
         this.staticConfig = Collections.unmodifiableMap(new HashMap<>(staticConfig));
         this.currentController = new ConfigResource(Type.BROKER, Integer.toString(nodeId));
+        this.minIsrConfigUpdatePartitionHandler = minIsrConfigUpdatePartitionHandler;
     }
 
     SnapshotRegistry snapshotRegistry() {
@@ -260,6 +279,7 @@ public class ConfigurationControlManager {
         if (error.isFailure()) {
             return error;
         }
+        maybeTriggerPartitionUpdateOnMinIsrChange(newRecords);
         outputRecords.addAll(newRecords);
         return ApiError.NONE;
     }
@@ -306,6 +326,48 @@ public class ConfigurationControlManager {
             return apiError;
         }
         return ApiError.NONE;
+    }
+
+    void maybeTriggerPartitionUpdateOnMinIsrChange(List<ApiMessageAndVersion> records) {
+        List<ConfigRecord> minIsrRecords = new ArrayList<>();
+        Map<String, String> topicMap = new HashMap<>();
+        Map<String, String> configRemovedTopicMap = new HashMap<>();
+        records.forEach(record -> {
+            if (MetadataRecordType.fromId(record.message().apiKey()) == MetadataRecordType.CONFIG_RECORD) {
+                ConfigRecord configRecord = (ConfigRecord) record.message();
+                if (configRecord.name().equals(TopicConfig.MIN_IN_SYNC_REPLICAS_CONFIG)) {
+                    minIsrRecords.add(configRecord);
+                    if (Type.forId(configRecord.resourceType()) == Type.TOPIC) {
+                        if (configRecord.value() == null) topicMap.put(configRecord.resourceName(), configRecord.value());
+                        else configRemovedTopicMap.put(configRecord.resourceName(), configRecord.value());
+                    }
+                }
+            }
+        });
+
+        if (minIsrRecords.isEmpty()) return;
+        if (topicMap.size() == minIsrRecords.size()) {
+            // If all the min isr config updates are on the topic level, we can trigger a simpler update just on the
+            // updated topics.
+            records.addAll(minIsrConfigUpdatePartitionHandler.addRecordsForMinIsrUpdate(
+                new ArrayList<>(topicMap.keySet()),
+                topicName -> topicMap.get(topicName))
+            );
+            return;
+        }
+
+        // Because it may require multiple layer look up for the min ISR config value. Build a config data copy and apply
+        // the config updates to it. Use this config copy for the min ISR look up.
+        Map<ConfigResource, TimelineHashMap<String, String>> configDataCopy = new HashMap<>(configData);
+        SnapshotRegistry localSnapshotRegistry = new SnapshotRegistry(new LogContext("dummy-config-update"));
+        for (ConfigRecord record : minIsrRecords) {
+            replayInternal(record, configDataCopy, localSnapshotRegistry);
+        }
+        records.addAll(minIsrConfigUpdatePartitionHandler.addRecordsForMinIsrUpdate(
+            configRemovedTopicMap.size() == minIsrRecords.size() ?
+                new ArrayList<>(configRemovedTopicMap.keySet()) : Collections.emptyList(),
+            topicName -> getTopicConfigInternal(topicName, TopicConfig.MIN_IN_SYNC_REPLICAS_CONFIG, configDataCopy))
+        );
     }
 
     /**
@@ -375,6 +437,7 @@ public class ConfigurationControlManager {
         }
         outputRecords.addAll(recordsExplicitlyAltered);
         outputRecords.addAll(recordsImplicitlyDeleted);
+        maybeTriggerPartitionUpdateOnMinIsrChange(outputRecords);
         outputResults.put(configResource, ApiError.NONE);
     }
 
@@ -401,12 +464,36 @@ public class ConfigurationControlManager {
      * @param record            The ConfigRecord.
      */
     public void replay(ConfigRecord record) {
+        replayInternal(record, configData, snapshotRegistry);
         Type type = Type.forId(record.resourceType());
         ConfigResource configResource = new ConfigResource(type, record.resourceName());
-        TimelineHashMap<String, String> configs = configData.get(configResource);
+        if (configSchema.isSensitive(record)) {
+            log.info("Replayed ConfigRecord for {} which set configuration {} to {}",
+                    configResource, record.name(), Password.HIDDEN);
+        } else {
+            log.info("Replayed ConfigRecord for {} which set configuration {} to {}",
+                    configResource, record.name(), record.value());
+        }
+    }
+
+    /**
+     * Apply a configuration record to the given config data.
+     *
+     * @param record                 The ConfigRecord.
+     * @param localConfigData        The config data is going to be updated.
+     * @param localSnapshotRegistry  The snapshot registry to use when adding configs.
+     */
+    public void replayInternal(
+        ConfigRecord record,
+        Map<ConfigResource, TimelineHashMap<String, String>> localConfigData,
+        SnapshotRegistry localSnapshotRegistry
+    ) {
+        Type type = Type.forId(record.resourceType());
+        ConfigResource configResource = new ConfigResource(type, record.resourceName());
+        TimelineHashMap<String, String> configs = localConfigData.get(configResource);
         if (configs == null) {
-            configs = new TimelineHashMap<>(snapshotRegistry, 0);
-            configData.put(configResource, configs);
+            configs = new TimelineHashMap<>(localSnapshotRegistry, 0);
+            localConfigData.put(configResource, configs);
         }
         if (record.value() == null) {
             configs.remove(record.name());
@@ -414,14 +501,7 @@ public class ConfigurationControlManager {
             configs.put(record.name(), record.value());
         }
         if (configs.isEmpty()) {
-            configData.remove(configResource);
-        }
-        if (configSchema.isSensitive(record)) {
-            log.info("Replayed ConfigRecord for {} which set configuration {} to {}",
-                    configResource, record.name(), Password.HIDDEN);
-        } else {
-            log.info("Replayed ConfigRecord for {} which set configuration {} to {}",
-                    configResource, record.name(), record.value());
+            localConfigData.remove(configResource);
         }
     }
 
@@ -443,15 +523,24 @@ public class ConfigurationControlManager {
      * @param configKey            The key for the config.
      */
     String getTopicConfig(String topicName, String configKey) throws NoSuchElementException {
-        Map<String, String> map = configData.get(new ConfigResource(Type.TOPIC, topicName));
-        if (map == null || !map.containsKey(configKey)) {
-            Map<String, ConfigEntry> effectiveConfigMap = computeEffectiveTopicConfigs(Collections.emptyMap());
+        return getTopicConfigInternal(topicName, configKey, configData);
+    }
+
+    String getTopicConfigInternal(
+        String topicName,
+        String configKey,
+        Map<ConfigResource, TimelineHashMap<String, String>> localConfigData
+    ) throws NoSuchElementException {
+        Map<String, String> topicConfigs = localConfigData.get(new ConfigResource(Type.TOPIC, topicName));
+        if (topicConfigs == null || !topicConfigs.containsKey(configKey)) {
+            Map<String, ConfigEntry> effectiveConfigMap =
+                computeEffectiveTopicConfigsInternal(Collections.emptyMap(), localConfigData);
             if (!effectiveConfigMap.containsKey(configKey)) {
                 return null;
             }
             return effectiveConfigMap.get(configKey).value();
         }
-        return map.get(configKey);
+        return topicConfigs.get(configKey);
     }
 
     public Map<ConfigResource, ResultOrError<Map<String, String>>> describeConfigs(
@@ -500,17 +589,28 @@ public class ConfigurationControlManager {
     }
 
     Map<String, ConfigEntry> computeEffectiveTopicConfigs(Map<String, String> creationConfigs) {
-        return configSchema.resolveEffectiveTopicConfigs(staticConfig, clusterConfig(),
-            currentControllerConfig(), creationConfigs);
+        return computeEffectiveTopicConfigsInternal(creationConfigs, configData);
     }
 
-    Map<String, String> clusterConfig() {
-        Map<String, String> result = configData.get(DEFAULT_NODE);
+    Map<String, ConfigEntry> computeEffectiveTopicConfigsInternal(
+        Map<String, String> creationConfigs,
+        Map<ConfigResource, TimelineHashMap<String, String>> localConfigData) {
+        return configSchema.resolveEffectiveTopicConfigs(staticConfig, clusterConfig(localConfigData),
+            currentControllerConfig(localConfigData), creationConfigs);
+    }
+
+    Map<String, String> clusterConfig(Map<ConfigResource, TimelineHashMap<String, String>> localConfigData) {
+        Map<String, String> result = localConfigData.get(DEFAULT_NODE);
         return (result == null) ? Collections.emptyMap() : result;
     }
 
-    Map<String, String> currentControllerConfig() {
-        Map<String, String> result = configData.get(currentController);
+    Map<String, String> currentControllerConfig(Map<ConfigResource, TimelineHashMap<String, String>> localConfigData) {
+        Map<String, String> result = localConfigData.get(currentController);
         return (result == null) ? Collections.emptyMap() : result;
+    }
+
+    @FunctionalInterface
+    interface MinIsrConfigUpdatePartitionHandler {
+        List<ApiMessageAndVersion> addRecordsForMinIsrUpdate(List<String> topicNames, Function<String, String> getTopicMinIsrConfig);
     }
 }
