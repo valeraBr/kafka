@@ -21,7 +21,10 @@ import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.clients.consumer.OffsetResetStrategy;
 import org.apache.kafka.common.IsolationLevel;
 import org.apache.kafka.common.TopicPartition;
-import org.apache.kafka.common.errors.RecordDeserializationException;
+import org.apache.kafka.common.errors.KeyDeserializationException;
+import org.apache.kafka.common.errors.ValueDeserializationException;
+import org.apache.kafka.common.header.Headers;
+import org.apache.kafka.common.header.internals.RecordHeaders;
 import org.apache.kafka.common.message.FetchResponseData;
 import org.apache.kafka.common.metrics.Metrics;
 import org.apache.kafka.common.protocol.ApiKeys;
@@ -48,7 +51,9 @@ import java.util.Collections;
 import java.util.List;
 import java.util.UUID;
 
+import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 public class CompletedFetchTest {
@@ -161,6 +166,10 @@ public class CompletedFetchTest {
              final UUIDSerializer serializer = new UUIDSerializer()) {
             builder.append(new SimpleRecord(serializer.serialize(TOPIC_NAME, UUID.randomUUID())));
             builder.append(0L, "key".getBytes(), "value".getBytes());
+            builder.append(new SimpleRecord(serializer.serialize(TOPIC_NAME, UUID.randomUUID())));
+            Headers headers = new RecordHeaders();
+            headers.add("hkey", "hvalue".getBytes());
+            builder.append(10L, serializer.serialize("key", UUID.randomUUID()), "otherValue".getBytes(), headers.toArray());
             Records records = builder.build();
 
             FetchResponseData.PartitionData partitionData = new FetchResponseData.PartitionData()
@@ -176,8 +185,27 @@ public class CompletedFetchTest {
 
                 completedFetch.fetchRecords(fetchConfig, deserializers, 10);
 
-                assertThrows(RecordDeserializationException.class,
+                KeyDeserializationException thrown = assertThrows(KeyDeserializationException.class,
                         () -> completedFetch.fetchRecords(fetchConfig, deserializers, 10));
+                assertEquals(1, thrown.offset());
+                assertEquals(TOPIC_NAME, thrown.topicPartition().topic());
+                assertEquals(0, thrown.topicPartition().partition());
+                assertEquals(0, thrown.timestamp());
+                assertArrayEquals("key".getBytes(), thrown.key());
+                assertArrayEquals("value".getBytes(), thrown.value());
+                assertEquals(0, thrown.headers().toArray().length);
+
+                CompletedFetch completedFetch2 = newCompletedFetch(2, partitionData);
+                completedFetch2.fetchRecords(fetchConfig, deserializers, 10);
+                ValueDeserializationException valueThrown = assertThrows(ValueDeserializationException.class,
+                        () -> completedFetch2.fetchRecords(fetchConfig, deserializers, 10));
+                assertEquals(3, valueThrown.offset());
+                assertEquals(TOPIC_NAME, valueThrown.topicPartition().topic());
+                assertEquals(0, valueThrown.topicPartition().partition());
+                assertEquals(10L, valueThrown.timestamp());
+                assertNotNull(valueThrown.key());
+                assertArrayEquals("otherValue".getBytes(), valueThrown.value());
+                assertEquals(headers, valueThrown.headers());
             }
         }
     }
