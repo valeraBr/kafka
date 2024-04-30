@@ -42,8 +42,8 @@ import org.apache.kafka.server.fault.FaultHandler
 import org.junit.jupiter.api.Assertions.{assertEquals, assertNotNull, assertTrue}
 import org.junit.jupiter.api.{AfterEach, BeforeEach, Test}
 import org.mockito.ArgumentMatchers.any
-import org.mockito.Mockito
-import org.mockito.Mockito.{clearInvocations, doThrow, mock, times, verify, verifyNoInteractions}
+import org.mockito.{ArgumentMatchers, Mockito}
+import org.mockito.Mockito.{clearInvocations, doThrow, mock, times, verify, verifyNoInteractions, when}
 import org.mockito.invocation.InvocationOnMock
 import org.mockito.stubbing.Answer
 
@@ -318,5 +318,62 @@ class BrokerMetadataPublisherTest {
     verify(brokerLifecycleManager, times(0)).handleKraftJBODMetadataVersionUpdate()
 
     metadataPublisher.close()
+  }
+
+  @Test
+  def testMetadataVersionUpdateValidatesConfiguration(): Unit = {
+    val config = Mockito.spy(KafkaConfig.fromProps(TestUtils.createBrokerConfig(0, "")))
+    val faultHandler = mock(classOf[FaultHandler])
+    val metadataPublisher = new BrokerMetadataPublisher(
+      config,
+      new KRaftMetadataCache(0),
+      mock(classOf[LogManager]),
+      mock(classOf[ReplicaManager]),
+      mock(classOf[GroupCoordinator]),
+      mock(classOf[TransactionCoordinator]),
+      mock(classOf[DynamicConfigPublisher]),
+      mock(classOf[DynamicClientQuotaPublisher]),
+      mock(classOf[ScramPublisher]),
+      mock(classOf[DelegationTokenPublisher]),
+      mock(classOf[AclPublisher]),
+      faultHandler,
+      mock(classOf[FaultHandler]),
+      mock(classOf[BrokerLifecycleManager]),
+    )
+    val deltaManifest = LogDeltaManifest.newBuilder()
+      .provenance(MetadataProvenance.EMPTY)
+      .leaderAndEpoch(LeaderAndEpoch.UNKNOWN)
+      .numBatches(1)
+      .elapsedNs(100)
+      .numBytes(42)
+      .build()
+    val delta = new MetadataDelta.Builder()
+      .setImage(MetadataImage.EMPTY)
+      .build()
+
+    // First discovered metadata.version is validated
+    delta.replay(new FeatureLevelRecord().
+      setName(MetadataVersion.FEATURE_NAME).
+      setFeatureLevel(MetadataVersion.IBP_3_6_IV2.featureLevel()))
+    metadataPublisher.onMetadataUpdate(delta, delta.apply(new MetadataProvenance(100, 4, 2000)), deltaManifest)
+    verify(config, times(1)).validateWithMetadataVersion(ArgumentMatchers.eq(MetadataVersion.IBP_3_6_IV2))
+
+    // Subsequent metadata.version discoveries are also validated
+    delta.replay(new FeatureLevelRecord().
+      setName(MetadataVersion.FEATURE_NAME).
+      setFeatureLevel(MetadataVersion.IBP_3_7_IV2.featureLevel()))
+    metadataPublisher.onMetadataUpdate(delta, delta.apply(new MetadataProvenance(200, 8, 4000)), deltaManifest)
+    verify(config, times(1)).validateWithMetadataVersion(ArgumentMatchers.eq(MetadataVersion.IBP_3_7_IV2))
+
+    // Validation failures trigger a fault
+    delta.replay(new FeatureLevelRecord().
+      setName(MetadataVersion.FEATURE_NAME).
+      setFeatureLevel(MetadataVersion.IBP_3_8_IV0.featureLevel()))
+    val cause = new IllegalArgumentException()
+    when(config.validateWithMetadataVersion(ArgumentMatchers.eq(MetadataVersion.IBP_3_8_IV0))).thenThrow(cause)
+    metadataPublisher.onMetadataUpdate(delta, delta.apply(new MetadataProvenance(200, 8, 4000)), deltaManifest)
+    verify(faultHandler, times(1)).handleFault(
+      ArgumentMatchers.eq("Broker configuration does not support the cluster MetadataVersion"),
+      ArgumentMatchers.eq(cause))
   }
 }
