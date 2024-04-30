@@ -39,13 +39,16 @@ public abstract class ExtractField<R extends ConnectRecord<R>> implements Transf
                     + "or value (<code>" + Value.class.getName() + "</code>).";
 
     private static final String FIELD_CONFIG = "field";
+    private static final String REPLACE_NULL_WITH_DEFAULT_CONFIG = "replace.null.with.default";
 
     public static final ConfigDef CONFIG_DEF = new ConfigDef()
-            .define(FIELD_CONFIG, ConfigDef.Type.STRING, ConfigDef.NO_DEFAULT_VALUE, ConfigDef.Importance.MEDIUM, "Field name to extract.");
+            .define(FIELD_CONFIG, ConfigDef.Type.STRING, ConfigDef.NO_DEFAULT_VALUE, ConfigDef.Importance.MEDIUM, "Field name to extract.")
+            .define(REPLACE_NULL_WITH_DEFAULT_CONFIG, ConfigDef.Type.BOOLEAN, Boolean.TRUE, ConfigDef.Importance.MEDIUM, "Determine if null field value must be replaced with its default value or not.");
 
     private static final String PURPOSE = "field extraction";
 
     private String fieldName;
+    private boolean replaceNullWithDefault;
 
     @Override
     public String version() {
@@ -56,6 +59,7 @@ public abstract class ExtractField<R extends ConnectRecord<R>> implements Transf
     public void configure(Map<String, ?> props) {
         final SimpleConfig config = new SimpleConfig(CONFIG_DEF, props);
         fieldName = config.getString(FIELD_CONFIG);
+        replaceNullWithDefault = config.getBoolean(REPLACE_NULL_WITH_DEFAULT_CONFIG);
     }
 
     @Override
@@ -72,7 +76,12 @@ public abstract class ExtractField<R extends ConnectRecord<R>> implements Transf
                 throw new IllegalArgumentException("Unknown field: " + fieldName);
             }
 
-            return newRecord(record, field.schema(), value == null ? null : value.get(fieldName));
+            if (replaceNullWithDefault) {
+                return newRecord(record, field.schema(), value == null ? null : value.get(fieldName));
+            }
+
+            return newRecord(record, field.schema(), value == null ? null : value.getWithoutDefault(fieldName));
+
         }
     }
 

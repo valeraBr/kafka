@@ -54,6 +54,7 @@ public abstract class InsertField<R extends ConnectRecord<R>> implements Transfo
         String TIMESTAMP_FIELD = "timestamp.field";
         String STATIC_FIELD = "static.field";
         String STATIC_VALUE = "static.value";
+        String REPLACE_NULL_WITH_DEFAULT_CONFIG = "replace.null.with.default";
     }
 
     private static final String OPTIONALITY_DOC = "Suffix with <code>!</code> to make this a required field, or <code>?</code> to keep it optional (the default).";
@@ -70,7 +71,9 @@ public abstract class InsertField<R extends ConnectRecord<R>> implements Transfo
             .define(ConfigName.STATIC_FIELD, ConfigDef.Type.STRING, null, ConfigDef.Importance.MEDIUM,
                     "Field name for static data field. " + OPTIONALITY_DOC)
             .define(ConfigName.STATIC_VALUE, ConfigDef.Type.STRING, null, ConfigDef.Importance.MEDIUM,
-                    "Static field value, if field name configured.");
+                    "Static field value, if field name configured.")
+            .define(ConfigName.REPLACE_NULL_WITH_DEFAULT_CONFIG, ConfigDef.Type.BOOLEAN, Boolean.TRUE, ConfigDef.Importance.MEDIUM,
+                    "Determine if null field value must be replaced with its default value or not.");
 
     private static final String PURPOSE = "field insertion";
 
@@ -104,6 +107,8 @@ public abstract class InsertField<R extends ConnectRecord<R>> implements Transfo
     private InsertionSpec staticField;
     private String staticValue;
 
+    protected boolean replaceNullWithDefault;
+
     private Cache<Schema, Schema> schemaUpdateCache;
 
     @Override
@@ -120,6 +125,7 @@ public abstract class InsertField<R extends ConnectRecord<R>> implements Transfo
         timestampField = InsertionSpec.parse(config.getString(ConfigName.TIMESTAMP_FIELD));
         staticField = InsertionSpec.parse(config.getString(ConfigName.STATIC_FIELD));
         staticValue = config.getString(ConfigName.STATIC_VALUE);
+        replaceNullWithDefault = config.getBoolean(ConfigName.REPLACE_NULL_WITH_DEFAULT_CONFIG);
 
         if (topicField == null && partitionField == null && offsetField == null && timestampField == null && staticField == null) {
             throw new ConfigException("No field insertion configured");
@@ -179,7 +185,7 @@ public abstract class InsertField<R extends ConnectRecord<R>> implements Transfo
         final Struct updatedValue = new Struct(updatedSchema);
 
         for (Field field : value.schema().fields()) {
-            updatedValue.put(field.name(), value.get(field));
+            updatedValue.put(field.name(), getFieldValue(value, field));
         }
 
         if (topicField != null) {
@@ -227,6 +233,14 @@ public abstract class InsertField<R extends ConnectRecord<R>> implements Transfo
         return builder.build();
     }
 
+    private Object getFieldValue(Struct value, Field field) {
+
+        if (replaceNullWithDefault) {
+            return value.get(field);
+        }
+        return value.getWithoutDefault(field.name());
+    }
+
     @Override
     public void close() {
         schemaUpdateCache = null;
@@ -242,6 +256,7 @@ public abstract class InsertField<R extends ConnectRecord<R>> implements Transfo
     protected abstract Object operatingValue(R record);
 
     protected abstract R newRecord(R record, Schema updatedSchema, Object updatedValue);
+
 
     public static class Key<R extends ConnectRecord<R>> extends InsertField<R> {
 
@@ -259,7 +274,6 @@ public abstract class InsertField<R extends ConnectRecord<R>> implements Transfo
         protected R newRecord(R record, Schema updatedSchema, Object updatedValue) {
             return record.newRecord(record.topic(), record.kafkaPartition(), updatedSchema, updatedValue, record.valueSchema(), record.value(), record.timestamp());
         }
-
     }
 
     public static class Value<R extends ConnectRecord<R>> extends InsertField<R> {
@@ -278,7 +292,6 @@ public abstract class InsertField<R extends ConnectRecord<R>> implements Transfo
         protected R newRecord(R record, Schema updatedSchema, Object updatedValue) {
             return record.newRecord(record.topic(), record.kafkaPartition(), record.keySchema(), record.key(), updatedSchema, updatedValue, record.timestamp());
         }
-
     }
 
 }

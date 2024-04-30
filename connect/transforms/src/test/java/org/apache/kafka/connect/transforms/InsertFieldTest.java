@@ -24,6 +24,7 @@ import org.apache.kafka.connect.data.Timestamp;
 import org.apache.kafka.connect.errors.DataException;
 import org.apache.kafka.connect.source.SourceRecord;
 import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
 import java.util.Collections;
@@ -208,5 +209,64 @@ public class InsertFieldTest {
         assertEquals(AppInfoParser.getVersion(), xformValue.version());
 
         assertEquals(xformKey.version(), xformValue.version());
+    }
+
+    @Test
+    @DisplayName("Null value fields copied as null instead of default")
+    public void whenValueConverterReplaceNullWithDefaultIsFalseNullCopiedFieldsWithNullValueMustRemainNull() {
+
+        final Map<String, Object> props = new HashMap<>();
+        props.put("topic.field", "topic_field!");
+        props.put("partition.field", "partition_field");
+        props.put("timestamp.field", "timestamp_field?");
+        props.put("static.field", "instance_id");
+        props.put("static.value", "my-instance-id");
+        props.put("replace.null.with.default", false);
+
+        xformValue.configure(props);
+
+        Schema magicFieldSchema = SchemaBuilder.int64().optional().defaultValue(42L).build();
+        final Schema simpleStructSchema = SchemaBuilder.struct().name("name").version(1).doc("doc").field("magic_with_default", magicFieldSchema).build();
+        final Struct simpleStruct = new Struct(simpleStructSchema).put("magic_with_default", null);
+
+        final SourceRecord record = new SourceRecord(null, null, "test", 0, null, null, simpleStructSchema, simpleStruct, 789L);
+        final SourceRecord transformedRecord = xformValue.apply(record);
+
+        assertEquals(simpleStructSchema.name(), transformedRecord.valueSchema().name());
+        assertEquals(simpleStructSchema.version(), transformedRecord.valueSchema().version());
+        assertEquals(simpleStructSchema.doc(), transformedRecord.valueSchema().doc());
+
+        assertEquals(magicFieldSchema, transformedRecord.valueSchema().field("magic_with_default").schema());
+        assertNull(((Struct) transformedRecord.value()).getInt64("magic_with_default"));
+
+    }
+
+    @Test
+    @DisplayName("Use default value when coping fields with null value")
+    public void whenValueConverterReplaceNullWithDefaultIsTrueCopiedFieldsWithNullValueMustUseDefault() {
+
+        final Map<String, Object> props = new HashMap<>();
+        props.put("topic.field", "topic_field!");
+        props.put("partition.field", "partition_field");
+        props.put("timestamp.field", "timestamp_field?");
+        props.put("static.field", "instance_id");
+        props.put("static.value", "my-instance-id");
+
+        xformValue.configure(props);
+
+        Schema magicFieldSchema = SchemaBuilder.int64().optional().defaultValue(42L).build();
+        final Schema simpleStructSchema = SchemaBuilder.struct().name("name").version(1).doc("doc").field("magic_with_default", magicFieldSchema).build();
+        final Struct simpleStruct = new Struct(simpleStructSchema).put("magic_with_default", null);
+
+        final SourceRecord record = new SourceRecord(null, null, "test", 0, null, null, simpleStructSchema, simpleStruct, 789L);
+        final SourceRecord transformedRecord = xformValue.apply(record);
+
+        assertEquals(simpleStructSchema.name(), transformedRecord.valueSchema().name());
+        assertEquals(simpleStructSchema.version(), transformedRecord.valueSchema().version());
+        assertEquals(simpleStructSchema.doc(), transformedRecord.valueSchema().doc());
+
+        assertEquals(magicFieldSchema, transformedRecord.valueSchema().field("magic_with_default").schema());
+        assertEquals(42L, ((Struct) transformedRecord.value()).getInt64("magic_with_default").longValue());
+
     }
 }
