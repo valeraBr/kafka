@@ -42,7 +42,7 @@ import org.apache.kafka.common.security.auth.SecurityProtocol
 import org.apache.kafka.common.utils.{LogContext, Time, Utils}
 import org.apache.kafka.raft.QuorumConfig.{AddressSpec, InetAddressSpec, NON_ROUTABLE_ADDRESS, UnknownAddressSpec}
 import org.apache.kafka.raft.{FileBasedStateStore, KafkaNetworkChannel, KafkaRaftClient, KafkaRaftClientDriver, LeaderAndEpoch, RaftClient, QuorumConfig, ReplicatedLog}
-import org.apache.kafka.server.ProcessRole
+import org.apache.kafka.server.common.ProcessRole
 import org.apache.kafka.server.common.serialization.RecordSerde
 import org.apache.kafka.server.util.KafkaScheduler
 import org.apache.kafka.server.fault.FaultHandler

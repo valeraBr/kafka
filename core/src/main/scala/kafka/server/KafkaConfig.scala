@@ -41,11 +41,10 @@ import org.apache.kafka.coordinator.group.assignor.PartitionAssignor
 import org.apache.kafka.coordinator.transaction.{TransactionLogConfigs, TransactionStateManagerConfigs}
 import org.apache.kafka.network.SocketServerConfigs
 import org.apache.kafka.raft.QuorumConfig
-import org.apache.kafka.security.authorizer.AuthorizerUtils
 import org.apache.kafka.security.PasswordEncoderConfigs
-import org.apache.kafka.server.ProcessRole
+import org.apache.kafka.security.authorizer.AuthorizerUtils
 import org.apache.kafka.server.authorizer.Authorizer
-import org.apache.kafka.server.common.{MetadataVersion, MetadataVersionValidator}
+import org.apache.kafka.server.common.{MetadataVersion, MetadataVersionValidator, ProcessRole}
 import org.apache.kafka.server.common.MetadataVersion._
 import org.apache.kafka.server.config.{Defaults, KRaftConfigs, KafkaSecurityConfigs, QuotaConfigs, ReplicationConfigs, ServerLogConfigs, ServerTopicConfigSynonyms, ZkConfigs}
 import org.apache.kafka.server.log.remote.storage.RemoteLogManagerConfig
