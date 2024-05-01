@@ -38,6 +38,7 @@ import org.apache.kafka.server.common.MetadataVersion;
 import org.apache.kafka.server.config.ZooKeeperInternals;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.platform.commons.util.StringUtils;
 import scala.collection.JavaConverters;
 import scala.collection.Seq;
 
@@ -78,8 +79,7 @@ public class ConfigCommandIntegrationTest {
     }
 
     @ClusterTests({
-        @ClusterTest(clusterType = Type.ZK),
-        @ClusterTest(clusterType = Type.KRAFT)
+        @ClusterTest(clusterType = Type.ALL)
     })
     public void testExitWithNonZeroStatusOnUpdatingUnallowedConfig() {
         assertNonZeroStatusExit(Stream.concat(quorumArgs(), Stream.of(
@@ -103,22 +103,28 @@ public class ConfigCommandIntegrationTest {
                 assertTrue(errOut.contains("User configuration updates using ZooKeeper are only supported for SCRAM credential updates."), errOut));
     }
 
-    public static void assertNonZeroStatusExit(Stream<String> args, Consumer<String> checkErrOut) {
+    @ClusterTests({
+            @ClusterTest(clusterType = Type.KRAFT),
+            @ClusterTest(clusterType = Type.CO_KRAFT)
+    })
+    public void testNullStatusOnKraftCommandAlterUserQuota() {
+        Stream<String> command = Stream.concat(quorumArgs(), Stream.of(
+            "--entity-type", "users",
+            "--entity-name", "admin",
+            "--alter", "--add-config", "consumer_byte_rate=20000"));
+        String message = captureStandardMsg(new BrokerCommand(command));
+
+        assertTrue(StringUtils.isBlank(message), message);
+    }
+
+    public void assertNonZeroStatusExit(Stream<String> args, Consumer<String> checkErrOut) {
         AtomicReference<Integer> exitStatus = new AtomicReference<>();
         Exit.setExitProcedure((status, __) -> {
             exitStatus.set(status);
             throw new RuntimeException();
         });
 
-        String errOut = captureStandardErr(() -> {
-            try {
-                ConfigCommand.main(args.toArray(String[]::new));
-            } catch (RuntimeException e) {
-                // do nothing.
-            } finally {
-                Exit.resetExitProcedure();
-            }
-        });
+        String errOut = captureStandardMsg(new BrokerCommand(args));
 
         checkErrOut.accept(errOut);
         assertNotNull(exitStatus.get());
@@ -135,7 +141,7 @@ public class ConfigCommandIntegrationTest {
         return brokerId.map(id -> Arrays.asList("--entity-name", id)).orElse(Collections.singletonList("--entity-default"));
     }
 
-    public void alterConfigWithZk(KafkaZkClient zkClient, Map<String, String> configs, Optional<String> brokerId) throws Exception {
+    public void alterConfigWithZk(KafkaZkClient zkClient, Map<String, String> configs, Optional<String> brokerId) {
         alterConfigWithZk(zkClient, configs, brokerId, Collections.emptyMap());
     }
 
@@ -263,7 +269,7 @@ public class ConfigCommandIntegrationTest {
         return Stream.of(lists).flatMap(List::stream).toArray(String[]::new);
     }
 
-    public static String captureStandardErr(Runnable runnable) {
+    public static String captureStandardMsg(Runnable runnable) {
         return captureStandardStream(true, runnable);
     }
 
@@ -285,6 +291,26 @@ public class ConfigCommandIntegrationTest {
                 System.setOut(currentStream);
 
             tempStream.close();
+        }
+    }
+
+    private static class BrokerCommand implements Runnable {
+
+        private final String[] command;
+
+        public BrokerCommand(Stream<String> command) {
+            this.command = command.toArray(String[]::new);
+        }
+
+        @Override
+        public void run() {
+            try {
+                ConfigCommand.main(command);
+            } catch (RuntimeException e) {
+                // do nothing.
+            } finally {
+                Exit.resetExitProcedure();
+            }
         }
     }
 }
