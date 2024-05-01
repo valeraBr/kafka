@@ -196,14 +196,27 @@ public class ClusterTestExtensions implements TestTemplateInvocationContextProvi
         }
 
         Map<String, String> serverProperties = new HashMap<>();
+        Map<Integer, Map<String, String>> perServerProperties = new HashMap<>();
         for (ClusterConfigProperty property : defaults.serverProperties()) {
-            serverProperties.put(property.key(), property.value());
+            processClusterConfigProperty(property, serverProperties, perServerProperties);
         }
         for (ClusterConfigProperty property : annot.serverProperties()) {
-            serverProperties.put(property.key(), property.value());
+            processClusterConfigProperty(property, serverProperties, perServerProperties);
         }
-        configBuilder.setServerProperties(serverProperties);
+        configBuilder.setServerProperties(serverProperties)
+            .setPerServerProperties(perServerProperties);
         type.invocationContexts(context.getRequiredTestMethod().getName(), configBuilder.build(), testInvocations);
+    }
+
+    private void processClusterConfigProperty(ClusterConfigProperty property,
+                                              Map<String, String> serverProperties,
+                                              Map<Integer, Map<String, String>> perServerProperties) {
+        if (property.id() == -1) {
+            serverProperties.put(property.key(), property.value());
+        } else {
+            perServerProperties.computeIfAbsent(property.id(), ignored -> new HashMap<>())
+                    .put(property.key(), property.value());
+        }
     }
 
     private ClusterTestDefaults getClusterTestDefaults(Class<?> testClass) {
