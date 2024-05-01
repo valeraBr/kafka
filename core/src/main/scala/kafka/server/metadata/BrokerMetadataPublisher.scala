@@ -131,6 +131,7 @@ class BrokerMetadataPublisher(
 
       Option(delta.featuresDelta()).foreach { featuresDelta =>
         featuresDelta.metadataVersionChange().ifPresent{ metadataVersion =>
+          validateConfigurationWithNewMetadataVersion(metadataVersion)
           info(s"Updating metadata.version to ${metadataVersion.featureLevel()} at offset $highestOffsetAndEpoch.")
           val currentMetadataVersion = delta.image().features().metadataVersion()
           if (currentMetadataVersion.isLessThan(MetadataVersion.IBP_3_7_IV2) && metadataVersion.isAtLeast(MetadataVersion.IBP_3_7_IV2)) {
@@ -339,6 +340,15 @@ class BrokerMetadataPublisher(
     } catch {
       case t: Throwable => metadataPublishingFaultHandler.handleFault("Error starting high " +
         "watermark checkpoint thread during startup", t)
+    }
+  }
+
+  private def validateConfigurationWithNewMetadataVersion(metadataVersion: MetadataVersion): Unit = {
+    try {
+      config.validateWithMetadataVersion(metadataVersion)
+    } catch {
+      case t: Throwable =>
+        fatalFaultHandler.handleFault("Broker configuration does not support the cluster MetadataVersion", t)
     }
   }
 
