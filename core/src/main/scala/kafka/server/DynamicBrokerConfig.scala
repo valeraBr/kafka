@@ -221,7 +221,13 @@ class DynamicBrokerConfig(private val kafkaConfig: KafkaConfig) extends Logging 
   // collections, while another thread is iterating over them.
   private[server] val reconfigurables = new CopyOnWriteArrayList[Reconfigurable]()
   private val brokerReconfigurables = new CopyOnWriteArrayList[BrokerReconfigurable]()
+
+  /**
+   * The DynamicBrokerConfig lock which prevents concurrent changes to dynamic configuration.
+   * (It does not prevent new reconfigurables from being registered or unregistered, though.)
+   */
   private val lock = new ReentrantReadWriteLock
+
   private var metricsReceiverPluginOpt: Option[ClientMetricsReceiverPlugin] = _
   private var currentConfig: KafkaConfig = _
   private val dynamicConfigPasswordEncoder = if (kafkaConfig.processRoles.isEmpty) {
@@ -317,7 +323,7 @@ class DynamicBrokerConfig(private val kafkaConfig: KafkaConfig) extends Logging 
     reconfigurables.remove(reconfigurable)
   }
 
-  private def verifyReconfigurableConfigs(configNames: Set[String]): Unit = CoreUtils.inWriteLock(lock) {
+  private def verifyReconfigurableConfigs(configNames: Set[String]): Unit = {
     val nonDynamic = configNames.filter(DynamicConfig.Broker.nonDynamicProps.contains)
     require(nonDynamic.isEmpty, s"Reconfigurable contains non-dynamic configs $nonDynamic")
   }

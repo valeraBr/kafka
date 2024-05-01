@@ -1548,7 +1548,7 @@ class KRaftClusterTest {
       new TestKitNodes.Builder().
         setNumBrokerNodes(1).
         setNumControllerNodes(1).build()).
-      setConfigProp(KafkaConfig.NumNetworkThreadsProp, "4").
+      setConfigProp(KafkaConfig.NumNetworkThreadsProp, "2").
       build()
     try {
       cluster.format()
@@ -1559,7 +1559,7 @@ class KRaftClusterTest {
         admin.incrementalAlterConfigs(
           Collections.singletonMap(new ConfigResource(Type.BROKER, ""),
             Collections.singletonList(new AlterConfigOp(
-              new ConfigEntry(KafkaConfig.NumNetworkThreadsProp, "2"), OpType.SET)))).all().get()
+              new ConfigEntry(KafkaConfig.NumNetworkThreadsProp, "3"), OpType.SET)))).all().get()
         val newTopic = Collections.singletonList(new NewTopic("test-topic", 1, 1.toShort))
         val createTopicResult = admin.createTopics(newTopic)
         createTopicResult.all().get()
