@@ -16,19 +16,20 @@
  */
 package org.apache.kafka.raft;
 
-import org.apache.kafka.common.utils.LogContext;
-import org.apache.kafka.common.utils.Time;
-import org.apache.kafka.common.utils.Timer;
-import org.slf4j.Logger;
-
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.stream.Collectors;
+import org.apache.kafka.common.Uuid;
+import org.apache.kafka.common.utils.LogContext;
+import org.apache.kafka.common.utils.Time;
+import org.apache.kafka.common.utils.Timer;
+import org.slf4j.Logger;
 
 public class CandidateState implements EpochState {
     private final int localId;
+    private final Uuid localDirectoryId;
     private final int epoch;
     private final int retries;
     private final Map<Integer, State> voteStates = new HashMap<>();
@@ -39,7 +40,7 @@ public class CandidateState implements EpochState {
     private final Logger log;
 
     /**
-     * The lifetime of a candidate state is the following:
+     * The lifetime of a candidate state is the following.
      *
      *  1. Once started, it would keep record of the received votes.
      *  2. If majority votes granted, it can then end its life and will be replaced by a leader state;
@@ -51,6 +52,7 @@ public class CandidateState implements EpochState {
     protected CandidateState(
         Time time,
         int localId,
+        Uuid localDirectoryId,
         int epoch,
         Set<Integer> voters,
         Optional<LogOffsetMetadata> highWatermark,
@@ -58,7 +60,19 @@ public class CandidateState implements EpochState {
         int electionTimeoutMs,
         LogContext logContext
     ) {
+        if (!voters.contains(localId)) {
+            throw new IllegalArgumentException(
+                String.format(
+                    "Local replica ({}, {}) must be in the set of voters {}",
+                    localId,
+                    localDirectoryId,
+                    voters
+                )
+            );
+        }
+
         this.localId = localId;
+        this.localDirectoryId = localDirectoryId;
         this.epoch = epoch;
         this.highWatermark = highWatermark;
         this.retries = retries;
@@ -227,7 +241,12 @@ public class CandidateState implements EpochState {
 
     @Override
     public ElectionState election() {
-        return ElectionState.withVotedCandidate(epoch, localId, voteStates.keySet());
+        return ElectionState.withVotedCandidate(
+            epoch,
+            localId,
+            Optional.of(localDirectoryId),
+            voteStates.keySet()
+        );
     }
 
     @Override
@@ -241,11 +260,19 @@ public class CandidateState implements EpochState {
     }
 
     @Override
-    public boolean canGrantVote(int candidateId, boolean isLogUpToDate) {
+    public boolean canGrantVote(
+        int candidateId,
+        Optional<Uuid> candidateDirectoryId,
+        boolean isLogUpToDate
+    ) {
         // Still reject vote request even candidateId = localId, Although the candidate votes for
         // itself, this vote is implicit and not "granted".
-        log.debug("Rejecting vote request from candidate {} since we are already candidate in epoch {}",
-            candidateId, epoch);
+        log.debug(
+            "Rejecting vote request from candidate ({}, {}) since we are already candidate in epoch {}",
+            candidateId,
+            candidateDirectoryId,
+            epoch
+        );
         return false;
     }
 
