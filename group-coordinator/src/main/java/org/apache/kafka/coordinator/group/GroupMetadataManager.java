@@ -1312,13 +1312,14 @@ public class GroupMetadataManager {
             }
         }
 
+        // The subscription metadata is updated in two cases:
+        // 1) The member has updated its subscriptions;
+        // 2) The refresh deadline has been reached.
+        Map<String, Integer> subscribedTopicNamesMap = group.subscribedTopicNames();
         if (bumpGroupEpoch || group.hasMetadataExpired(currentTimeMs)) {
-            // The subscription metadata is updated in two cases:
-            // 1) The member has updated its subscriptions;
-            // 2) The refresh deadline has been reached.
+            subscribedTopicNamesMap = group.computeSubscribedTopicNames(member, updatedMember);
             subscriptionMetadata = group.computeSubscriptionMetadata(
-                member,
-                updatedMember,
+                subscribedTopicNamesMap,
                 metadataImage.topics(),
                 metadataImage.cluster()
             );
@@ -1355,6 +1356,7 @@ public class GroupMetadataManager {
                         .withMembers(group.members())
                         .withStaticMembers(group.staticMembers())
                         .withSubscriptionMetadata(subscriptionMetadata)
+                        .withSubscriptionType(ConsumerGroup.subscriptionType(subscribedTopicNamesMap))
                         .withTargetAssignment(group.targetAssignment())
                         .addOrUpdateMember(memberId, updatedMember);
                 TargetAssignmentBuilder.TargetAssignmentResult assignmentResult;
@@ -1579,8 +1581,7 @@ public class GroupMetadataManager {
 
             // We update the subscription metadata without the leaving member.
             Map<String, TopicMetadata> subscriptionMetadata = group.computeSubscriptionMetadata(
-                member,
-                null,
+                group.computeSubscribedTopicNames(member, null),
                 metadataImage.topics(),
                 metadataImage.cluster()
             );
@@ -1783,7 +1784,7 @@ public class GroupMetadataManager {
         String memberId = key.memberId();
 
         ConsumerGroup consumerGroup = getOrMaybeCreatePersistedConsumerGroup(groupId, value != null);
-        Set<String> oldSubscribedTopicNames = new HashSet<>(consumerGroup.subscribedTopicNames());
+        Set<String> oldSubscribedTopicNames = new HashSet<>(consumerGroup.subscribedTopicNames().keySet());
 
         if (value != null) {
             ConsumerGroupMember oldMember = consumerGroup.getOrMaybeCreateMember(memberId, true);
@@ -1803,7 +1804,7 @@ public class GroupMetadataManager {
             consumerGroup.removeMember(memberId);
         }
 
-        updateGroupsByTopics(groupId, oldSubscribedTopicNames, consumerGroup.subscribedTopicNames());
+        updateGroupsByTopics(groupId, oldSubscribedTopicNames, consumerGroup.subscribedTopicNames().keySet());
     }
 
     /**
