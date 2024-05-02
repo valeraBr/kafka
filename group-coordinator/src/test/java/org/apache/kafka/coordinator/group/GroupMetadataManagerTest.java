@@ -26,6 +26,7 @@ import org.apache.kafka.common.errors.FencedMemberEpochException;
 import org.apache.kafka.common.errors.GroupIdNotFoundException;
 import org.apache.kafka.common.errors.GroupMaxSizeReachedException;
 import org.apache.kafka.common.errors.IllegalGenerationException;
+import org.apache.kafka.common.errors.InconsistentGroupProtocolException;
 import org.apache.kafka.common.errors.InvalidRequestException;
 import org.apache.kafka.common.errors.NotLeaderOrFollowerException;
 import org.apache.kafka.common.errors.UnknownMemberIdException;
@@ -36,6 +37,7 @@ import org.apache.kafka.common.message.ConsumerGroupDescribeResponseData;
 import org.apache.kafka.common.errors.UnreleasedInstanceIdException;
 import org.apache.kafka.common.message.ConsumerGroupHeartbeatRequestData;
 import org.apache.kafka.common.message.ConsumerGroupHeartbeatResponseData;
+import org.apache.kafka.common.message.ConsumerProtocolSubscription;
 import org.apache.kafka.common.message.DescribeGroupsResponseData;
 import org.apache.kafka.common.message.HeartbeatRequestData;
 import org.apache.kafka.common.message.HeartbeatResponseData;
@@ -80,6 +82,7 @@ import org.apache.kafka.image.MetadataProvenance;
 import org.apache.kafka.server.common.MetadataVersion;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.ValueSource;
 
 import java.util.ArrayList;
@@ -3873,45 +3876,6 @@ public class GroupMetadataManagerTest {
 
         memberIds.subList(0, groupMaxSize)
             .forEach(memberId -> assertTrue(group.hasMemberId(memberId)));
-    }
-
-    @Test
-    public void testJoinGroupSessionTimeoutTooSmall() throws Exception {
-        int minSessionTimeout = 50;
-        GroupMetadataManagerTestContext context = new GroupMetadataManagerTestContext.Builder()
-            .withClassicGroupMinSessionTimeoutMs(minSessionTimeout)
-            .build();
-
-        JoinGroupRequestData request = new GroupMetadataManagerTestContext.JoinGroupRequestBuilder()
-            .withGroupId("group-id")
-            .withMemberId(UNKNOWN_MEMBER_ID)
-            .withSessionTimeoutMs(minSessionTimeout - 1)
-            .build();
-
-        GroupMetadataManagerTestContext.JoinResult joinResult = context.sendClassicGroupJoin(request);
-        assertTrue(joinResult.joinFuture.isDone());
-        assertTrue(joinResult.records.isEmpty());
-        assertEquals(Errors.INVALID_SESSION_TIMEOUT.code(), joinResult.joinFuture.get().errorCode());
-    }
-
-    @Test
-    public void testJoinGroupSessionTimeoutTooLarge() throws Exception {
-        int maxSessionTimeout = 50;
-        GroupMetadataManagerTestContext context = new GroupMetadataManagerTestContext.Builder()
-            .withClassicGroupMaxSessionTimeoutMs(maxSessionTimeout)
-            .build();
-
-        JoinGroupRequestData request = new GroupMetadataManagerTestContext.JoinGroupRequestBuilder()
-            .withGroupId("group-id")
-            .withMemberId(UNKNOWN_MEMBER_ID)
-            .withSessionTimeoutMs(maxSessionTimeout + 1)
-            .build();
-
-        GroupMetadataManagerTestContext.JoinResult joinResult = context.sendClassicGroupJoin(request);
-
-        assertTrue(joinResult.records.isEmpty());
-        assertTrue(joinResult.joinFuture.isDone());
-        assertEquals(Errors.INVALID_SESSION_TIMEOUT.code(), joinResult.joinFuture.get().errorCode());
     }
 
     @Test
@@ -9476,29 +9440,6 @@ public class GroupMetadataManagerTest {
     }
 
     @Test
-    public void testClassicGroupJoinWithNonEmptyConsumerGroup() throws Exception {
-        String consumerGroupId = "consumer-group-id";
-        String memberId = Uuid.randomUuid().toString();
-        GroupMetadataManagerTestContext context = new GroupMetadataManagerTestContext.Builder()
-            .withConsumerGroup(new ConsumerGroupBuilder(consumerGroupId, 10)
-            .withMember(new ConsumerGroupMember.Builder(memberId)
-                .setState(MemberState.STABLE)
-                .setMemberEpoch(10)
-                .setPreviousMemberEpoch(10)
-                .build()))
-            .build();
-
-        JoinGroupRequestData request = new GroupMetadataManagerTestContext.JoinGroupRequestBuilder()
-            .withGroupId(consumerGroupId)
-            .withMemberId(UNKNOWN_MEMBER_ID)
-            .withDefaultProtocolTypeAndProtocols()
-            .build();
-
-        GroupMetadataManagerTestContext.JoinResult joinResult = context.sendClassicGroupJoin(request);
-        assertEquals(Errors.GROUP_ID_NOT_FOUND.code(), joinResult.joinFuture.get().errorCode());
-    }
-
-    @Test
     public void testClassicGroupJoinWithEmptyConsumerGroup() throws Exception {
         String consumerGroupId = "consumer-group-id";
         GroupMetadataManagerTestContext context = new GroupMetadataManagerTestContext.Builder()
@@ -9630,12 +9571,9 @@ public class GroupMetadataManagerTest {
             .setSubscribedTopicNames(Arrays.asList(fooTopicName, barTopicName))
             .setRebalanceTimeoutMs(10000)
             .setSupportedClassicProtocols(protocols)
-            .setAssignedPartitions(new HashMap<Uuid, Set<Integer>>() {
-                {
-                    put(fooTopicId, new HashSet<>(Collections.singletonList(0)));
-                    put(barTopicId, new HashSet<>(Collections.singletonList(0)));
-                }
-            })
+            .setAssignedPartitions(mkAssignment(
+                mkTopicAssignment(fooTopicId, 0),
+                mkTopicAssignment(barTopicId, 0)))
             .build();
 
         ConsumerGroupMember expectedMember2 = new ConsumerGroupMember.Builder(memberId2)
@@ -9682,16 +9620,8 @@ public class GroupMetadataManagerTest {
 
             // Newly joining member 2 bumps the group epoch. A new target assignment is computed.
             RecordHelpers.newGroupEpochRecord(groupId, 1),
-            RecordHelpers.newTargetAssignmentRecord(groupId, memberId2, new HashMap<Uuid, Set<Integer>>() {
-                {
-                    put(barTopicId, new HashSet<>(Collections.singletonList(0)));
-                }
-            }),
-            RecordHelpers.newTargetAssignmentRecord(groupId, memberId1, new HashMap<Uuid, Set<Integer>>() {
-                {
-                    put(fooTopicId, new HashSet<>(Collections.singletonList(0)));
-                }
-            }),
+            RecordHelpers.newTargetAssignmentRecord(groupId, memberId2, assignor.targetPartitions(memberId2)),
+            RecordHelpers.newTargetAssignmentRecord(groupId, memberId1, assignor.targetPartitions(memberId1)),
             RecordHelpers.newTargetAssignmentEpochRecord(groupId, 1),
 
             // Member 2 has no pending revoking partition. Bump its member epoch and transition to UNRELEASED_PARTITIONS.
@@ -9859,11 +9789,8 @@ public class GroupMetadataManagerTest {
             .setSubscribedTopicNames(Arrays.asList(fooTopicName, barTopicName))
             .setRebalanceTimeoutMs(10000)
             .setSupportedClassicProtocols(protocols1)
-            .setAssignedPartitions(new HashMap<Uuid, Set<Integer>>() {
-                {
-                    put(fooTopicId, new HashSet<>(Arrays.asList(0, 1)));
-                }
-            })
+            .setAssignedPartitions(mkAssignment(
+                mkTopicAssignment(fooTopicId, 0, 1)))
             .build();
 
         ConsumerGroupMember expectedMember2 = new ConsumerGroupMember.Builder(memberId2)
@@ -9874,11 +9801,8 @@ public class GroupMetadataManagerTest {
             .setSubscribedTopicNames(Arrays.asList(fooTopicName, barTopicName))
             .setRebalanceTimeoutMs(10000)
             .setSupportedClassicProtocols(protocols2)
-            .setAssignedPartitions(new HashMap<Uuid, Set<Integer>>() {
-                {
-                    put(barTopicId, new HashSet<>(Collections.singletonList(0)));
-                }
-            })
+            .setAssignedPartitions(mkAssignment(
+                mkTopicAssignment(barTopicId, 0)))
             .build();
 
         ConsumerGroupMember expectedMember3 = new ConsumerGroupMember.Builder(memberId3)
@@ -9932,16 +9856,8 @@ public class GroupMetadataManagerTest {
 
             // Newly joining member 3 bumps the group epoch. A new target assignment is computed.
             RecordHelpers.newGroupEpochRecord(groupId, 1),
-            RecordHelpers.newTargetAssignmentRecord(groupId, memberId1, new HashMap<Uuid, Set<Integer>>() {
-                {
-                    put(fooTopicId, new HashSet<>(Collections.singletonList(0)));
-                }
-            }),
-            RecordHelpers.newTargetAssignmentRecord(groupId, memberId3, new HashMap<Uuid, Set<Integer>>() {
-                {
-                    put(fooTopicId, new HashSet<>(Collections.singletonList(1)));
-                }
-            }),
+            RecordHelpers.newTargetAssignmentRecord(groupId, memberId1, assignor.targetPartitions(memberId1)),
+            RecordHelpers.newTargetAssignmentRecord(groupId, memberId3, assignor.targetPartitions(memberId3)),
             RecordHelpers.newTargetAssignmentEpochRecord(groupId, 1),
 
             // Member 3 has no pending revoking partition. Bump its member epoch and transition to UNRELEASED_PARTITIONS.
@@ -10130,11 +10046,8 @@ public class GroupMetadataManagerTest {
             .setSubscribedTopicNames(Arrays.asList(fooTopicName, barTopicName))
             .setRebalanceTimeoutMs(10000)
             .setSupportedClassicProtocols(protocols1)
-            .setAssignedPartitions(new HashMap<Uuid, Set<Integer>>() {
-                {
-                    put(fooTopicId, new HashSet<>(Arrays.asList(0, 1)));
-                }
-            })
+            .setAssignedPartitions(mkAssignment(
+                mkTopicAssignment(fooTopicId, 0, 1)))
             .build();
 
         ConsumerGroupMember expectedMember2 = new ConsumerGroupMember.Builder(memberId2)
@@ -10145,11 +10058,8 @@ public class GroupMetadataManagerTest {
             .setSubscribedTopicNames(Arrays.asList(fooTopicName, barTopicName))
             .setRebalanceTimeoutMs(10000)
             .setSupportedClassicProtocols(protocols2)
-            .setAssignedPartitions(new HashMap<Uuid, Set<Integer>>() {
-                {
-                    put(barTopicId, new HashSet<>(Collections.singletonList(0)));
-                }
-            })
+            .setAssignedPartitions(mkAssignment(
+                mkTopicAssignment(barTopicId, 0)))
             .build();
 
         ConsumerGroupMember expectedMember3 = new ConsumerGroupMember.Builder(memberId3)
@@ -10203,16 +10113,8 @@ public class GroupMetadataManagerTest {
 
             // Newly joining member 3 bumps the group epoch. A new target assignment is computed.
             RecordHelpers.newGroupEpochRecord(groupId, 2),
-            RecordHelpers.newTargetAssignmentRecord(groupId, memberId1, new HashMap<Uuid, Set<Integer>>() {
-                {
-                    put(fooTopicId, new HashSet<>(Collections.singletonList(0)));
-                }
-            }),
-            RecordHelpers.newTargetAssignmentRecord(groupId, memberId3, new HashMap<Uuid, Set<Integer>>() {
-                {
-                    put(fooTopicId, new HashSet<>(Collections.singletonList(1)));
-                }
-            }),
+            RecordHelpers.newTargetAssignmentRecord(groupId, memberId1, assignor.targetPartitions(memberId1)),
+            RecordHelpers.newTargetAssignmentRecord(groupId, memberId3, assignor.targetPartitions(memberId3)),
             RecordHelpers.newTargetAssignmentEpochRecord(groupId, 2),
 
             // Member 3 has no pending revoking partition. Bump its member epoch and transition to UNRELEASED_PARTITIONS.
@@ -10919,6 +10821,1158 @@ public class GroupMetadataManagerTest {
         // A new rebalance is triggered.
         ClassicGroup classicGroup = context.groupMetadataManager.getOrMaybeCreateClassicGroup(groupId, false);
         assertTrue(classicGroup.isInState(PREPARING_REBALANCE));
+    }
+
+    @Test
+    public void testJoiningConsumerGroupThrowsExceptionIfGroupOverMaxSize() {
+        String groupId = "group-id";
+        String memberId = Uuid.randomUuid().toString();
+        GroupMetadataManagerTestContext context = new GroupMetadataManagerTestContext.Builder()
+            .withConsumerGroup(new ConsumerGroupBuilder(groupId, 10)
+                .withMember(new ConsumerGroupMember.Builder(memberId)
+                    .setState(MemberState.STABLE)
+                    .setMemberEpoch(10)
+                    .setPreviousMemberEpoch(10)
+                    .build()))
+            .withConsumerGroupMaxSize(1)
+            .build();
+
+        JoinGroupRequestData request = new GroupMetadataManagerTestContext.JoinGroupRequestBuilder()
+            .withGroupId(groupId)
+            .withMemberId(UNKNOWN_MEMBER_ID)
+            .withDefaultProtocolTypeAndProtocols()
+            .build();
+
+        Exception ex = assertThrows(GroupMaxSizeReachedException.class, () -> context.sendClassicGroupJoin(request));
+        assertEquals("The consumer group has reached its maximum capacity of 1 members.", ex.getMessage());
+    }
+
+    @Test
+    public void testJoiningConsumerGroupThrowsExceptionIfProtocolIsNotSupported() {
+        String groupId = "group-id";
+        String memberId = Uuid.randomUuid().toString();
+        GroupMetadataManagerTestContext context = new GroupMetadataManagerTestContext.Builder()
+            .withConsumerGroup(new ConsumerGroupBuilder(groupId, 10)
+                .withMember(new ConsumerGroupMember.Builder(memberId)
+                    .setState(MemberState.STABLE)
+                    .setMemberEpoch(10)
+                    .setPreviousMemberEpoch(10)
+                    .setSupportedClassicProtocols(GroupMetadataManagerTestContext.toProtocols("roundrobin"))
+                    .build()))
+            .build();
+
+        JoinGroupRequestData requestWithEmptyProtocols = new GroupMetadataManagerTestContext.JoinGroupRequestBuilder()
+            .withGroupId(groupId)
+            .withMemberId(UNKNOWN_MEMBER_ID)
+            .withProtocolType(ConsumerProtocol.PROTOCOL_TYPE)
+            .withDefaultProtocolTypeAndProtocols()
+            .build();
+        assertThrows(InconsistentGroupProtocolException.class, () -> context.sendClassicGroupJoin(requestWithEmptyProtocols));
+
+        JoinGroupRequestData requestWithInvalidProtocolType = new GroupMetadataManagerTestContext.JoinGroupRequestBuilder()
+            .withGroupId(groupId)
+            .withMemberId(UNKNOWN_MEMBER_ID)
+            .withProtocolType("connect")
+            .withDefaultProtocolTypeAndProtocols()
+            .build();
+        assertThrows(InconsistentGroupProtocolException.class, () -> context.sendClassicGroupJoin(requestWithInvalidProtocolType));
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {true, false})
+    public void testJoiningConsumerGroupWithNewDynamicMember(boolean replaySuccessfully) throws Exception {
+        String groupId = "group-id";
+        Uuid fooTopicId = Uuid.randomUuid();
+        String fooTopicName = "foo";
+        Uuid barTopicId = Uuid.randomUuid();
+        String barTopicName = "bar";
+
+        for (short version = ConsumerProtocolSubscription.LOWEST_SUPPORTED_VERSION; version <= ConsumerProtocolSubscription.HIGHEST_SUPPORTED_VERSION; version++) {
+            String memberId = Uuid.randomUuid().toString();
+            MockPartitionAssignor assignor = new MockPartitionAssignor("range");
+            GroupMetadataManagerTestContext context = new GroupMetadataManagerTestContext.Builder()
+                .withAssignors(Collections.singletonList(assignor))
+                .withMetadataImage(new MetadataImageBuilder()
+                    .addTopic(fooTopicId, fooTopicName, 2)
+                    .addTopic(barTopicId, barTopicName, 1)
+                    .addRacks()
+                    .build())
+                .withConsumerGroup(new ConsumerGroupBuilder(groupId, 10)
+                    .withSubscriptionMetadata(new HashMap<String, TopicMetadata>() {
+                        {
+                            put(fooTopicName, new TopicMetadata(fooTopicId, fooTopicName, 2, mkMapOfPartitionRacks(2)));
+                        }
+                    })
+                    .withMember(new ConsumerGroupMember.Builder(memberId)
+                        .setState(MemberState.STABLE)
+                        .setMemberEpoch(10)
+                        .setPreviousMemberEpoch(10)
+                        .build())
+                    .withAssignment(memberId, mkAssignment(
+                        mkTopicAssignment(fooTopicId, 0, 1)))
+                    .withAssignmentEpoch(10))
+                .build();
+
+            JoinGroupRequestData request = new GroupMetadataManagerTestContext.JoinGroupRequestBuilder()
+                .withGroupId(groupId)
+                .withMemberId(UNKNOWN_MEMBER_ID)
+                .withProtocols(GroupMetadataManagerTestContext.toConsumerProtocol(
+                    Arrays.asList(fooTopicName, barTopicName),
+                    Collections.emptyList(),
+                    version))
+                .build();
+
+            // The first round of join request gets the new member id.
+            GroupMetadataManagerTestContext.JoinResult firstJoinResult = context.sendClassicGroupJoin(
+                request,
+                true
+            );
+            assertTrue(firstJoinResult.records.isEmpty());
+            // Simulate a successful write to the log.
+            firstJoinResult.appendFuture.complete(null);
+
+            assertTrue(firstJoinResult.joinFuture.isDone());
+            assertEquals(Errors.MEMBER_ID_REQUIRED.code(), firstJoinResult.joinFuture.get().errorCode());
+            String newMemberId = firstJoinResult.joinFuture.get().memberId();
+
+            assignor.prepareGroupAssignment(new GroupAssignment(
+                new HashMap<String, MemberAssignment>() {
+                    {
+                        put(memberId, new MemberAssignment(mkAssignment(
+                            mkTopicAssignment(fooTopicId, 0)
+                        )));
+                        put(newMemberId, new MemberAssignment(mkAssignment(
+                            mkTopicAssignment(barTopicId, 0)
+                        )));
+                    }
+                }
+            ));
+
+            JoinGroupRequestData secondRequest = new JoinGroupRequestData()
+                .setGroupId(request.groupId())
+                .setMemberId(newMemberId)
+                .setProtocolType(request.protocolType())
+                .setProtocols(request.protocols())
+                .setSessionTimeoutMs(request.sessionTimeoutMs())
+                .setRebalanceTimeoutMs(request.rebalanceTimeoutMs())
+                .setReason(request.reason());
+
+            GroupMetadataManagerTestContext.JoinResult secondJoinResult = context.sendClassicGroupJoin(
+                secondRequest,
+                true
+            );
+
+            ConsumerGroupMember expectedMember = new ConsumerGroupMember.Builder(newMemberId)
+                .setMemberEpoch(11)
+                .setPreviousMemberEpoch(0)
+                .setState(MemberState.STABLE)
+                .setClientId("client")
+                .setClientHost("localhost/127.0.0.1")
+                .setSubscribedTopicNames(Arrays.asList(fooTopicName, barTopicName))
+                .setRebalanceTimeoutMs(500)
+                .setAssignedPartitions(assignor.targetPartitions(newMemberId))
+                .setSupportedClassicProtocols(request.protocols())
+                .build();
+
+            List<Record> expectedRecords = Arrays.asList(
+                RecordHelpers.newMemberSubscriptionRecord(groupId, expectedMember),
+                RecordHelpers.newGroupSubscriptionMetadataRecord(groupId, new HashMap<String, TopicMetadata>() {
+                    {
+                        put(fooTopicName, new TopicMetadata(fooTopicId, fooTopicName, 2, mkMapOfPartitionRacks(2)));
+                        put(barTopicName, new TopicMetadata(barTopicId, barTopicName, 1, mkMapOfPartitionRacks(1)));
+                    }
+                }),
+                RecordHelpers.newGroupEpochRecord(groupId, 11),
+
+                RecordHelpers.newTargetAssignmentRecord(groupId, memberId, assignor.targetPartitions(memberId)),
+                RecordHelpers.newTargetAssignmentRecord(groupId, newMemberId, assignor.targetPartitions(newMemberId)),
+
+                RecordHelpers.newTargetAssignmentEpochRecord(groupId, 11),
+                RecordHelpers.newCurrentAssignmentRecord(groupId, expectedMember)
+            );
+            assertRecordsEquals(expectedRecords.subList(0, 3), secondJoinResult.records.subList(0, 3));
+            assertUnorderedListEquals(expectedRecords.subList(3, 5), secondJoinResult.records.subList(3, 5));
+            assertRecordsEquals(expectedRecords.subList(5, 7), secondJoinResult.records.subList(5, 7));
+
+            if (replaySuccessfully) {
+                secondJoinResult.appendFuture.complete(null);
+                assertTrue(secondJoinResult.joinFuture.isDone());
+                assertEquals(
+                    new JoinGroupResponseData()
+                        .setMemberId(newMemberId)
+                        .setGenerationId(11)
+                        .setProtocolType(ConsumerProtocol.PROTOCOL_TYPE)
+                        .setProtocolName("range"),
+                    secondJoinResult.joinFuture.get()
+                );
+
+                context.assertSessionTimeout(groupId, newMemberId, request.sessionTimeoutMs());
+                context.assertSyncTimeout(groupId, newMemberId, request.rebalanceTimeoutMs());
+            } else {
+                secondJoinResult.appendFuture.completeExceptionally(new NotLeaderOrFollowerException());
+                assertEquals(
+                    new JoinGroupResponseData()
+                        .setErrorCode(Errors.NOT_COORDINATOR.code()),
+                    secondJoinResult.joinFuture.get()
+                );
+                context.assertNoSessionTimeout(groupId, newMemberId);
+                context.assertNoSyncTimeout(groupId, newMemberId);
+            }
+        }
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {true, false})
+    public void testJoiningConsumerGroupWithNewStaticMember(boolean replaySuccessfully) throws Exception {
+        String groupId = "group-id";
+        Uuid fooTopicId = Uuid.randomUuid();
+        String fooTopicName = "foo";
+        Uuid barTopicId = Uuid.randomUuid();
+        String barTopicName = "bar";
+
+        for (short version = ConsumerProtocolSubscription.LOWEST_SUPPORTED_VERSION; version <= ConsumerProtocolSubscription.HIGHEST_SUPPORTED_VERSION; version++) {
+            String memberId = Uuid.randomUuid().toString();
+            String instanceId = "instance-id-" + version;
+            MockPartitionAssignor assignor = new MockPartitionAssignor("range");
+            assignor.prepareGroupAssignment(new GroupAssignment(Collections.emptyMap()));
+            GroupMetadataManagerTestContext context = new GroupMetadataManagerTestContext.Builder()
+                .withAssignors(Collections.singletonList(assignor))
+                .withMetadataImage(new MetadataImageBuilder()
+                    .addTopic(fooTopicId, fooTopicName, 2)
+                    .addTopic(barTopicId, barTopicName, 1)
+                    .addRacks()
+                    .build())
+                .withConsumerGroup(new ConsumerGroupBuilder(groupId, 10)
+                    .withSubscriptionMetadata(new HashMap<String, TopicMetadata>() {
+                        {
+                            put(fooTopicName, new TopicMetadata(fooTopicId, fooTopicName, 2, mkMapOfPartitionRacks(2)));
+                        }
+                    })
+                    .withMember(new ConsumerGroupMember.Builder(memberId)
+                        .setState(MemberState.STABLE)
+                        .setMemberEpoch(10)
+                        .setPreviousMemberEpoch(10)
+                        .build())
+                    .withAssignment(memberId, mkAssignment(
+                        mkTopicAssignment(fooTopicId, 0, 1)))
+                    .withAssignmentEpoch(10))
+                .build();
+
+            JoinGroupRequestData request = new GroupMetadataManagerTestContext.JoinGroupRequestBuilder()
+                .withGroupId(groupId)
+                .withMemberId(UNKNOWN_MEMBER_ID)
+                .withGroupInstanceId(instanceId)
+                .withProtocols(GroupMetadataManagerTestContext.toConsumerProtocol(
+                    Arrays.asList(fooTopicName, barTopicName),
+                    Collections.emptyList(),
+                    version))
+                .build();
+
+            GroupMetadataManagerTestContext.JoinResult joinResult = context.sendClassicGroupJoin(request);
+
+            if (replaySuccessfully) {
+                joinResult.appendFuture.complete(null);
+                String newMemberId = joinResult.joinFuture.get().memberId();
+
+                ConsumerGroupMember expectedMember = new ConsumerGroupMember.Builder(newMemberId)
+                    .setMemberEpoch(11)
+                    .setPreviousMemberEpoch(0)
+                    .setInstanceId(instanceId)
+                    .setState(MemberState.STABLE)
+                    .setClientId("client")
+                    .setClientHost("localhost/127.0.0.1")
+                    .setSubscribedTopicNames(Arrays.asList(fooTopicName, barTopicName))
+                    .setRebalanceTimeoutMs(500)
+                    .setSupportedClassicProtocols(request.protocols())
+                    .build();
+
+                List<Record> expectedRecords = Arrays.asList(
+                    RecordHelpers.newMemberSubscriptionRecord(groupId, expectedMember),
+                    RecordHelpers.newGroupSubscriptionMetadataRecord(groupId, new HashMap<String, TopicMetadata>() {
+                        {
+                            put(fooTopicName, new TopicMetadata(fooTopicId, fooTopicName, 2, mkMapOfPartitionRacks(2)));
+                            put(barTopicName, new TopicMetadata(barTopicId, barTopicName, 1, mkMapOfPartitionRacks(1)));
+                        }
+                    }),
+                    RecordHelpers.newGroupEpochRecord(groupId, 11),
+
+                    RecordHelpers.newTargetAssignmentRecord(groupId, memberId, Collections.emptyMap()),
+                    RecordHelpers.newTargetAssignmentRecord(groupId, newMemberId, Collections.emptyMap()),
+
+                    RecordHelpers.newTargetAssignmentEpochRecord(groupId, 11),
+                    RecordHelpers.newCurrentAssignmentRecord(groupId, expectedMember)
+                );
+                assertRecordsEquals(expectedRecords.subList(0, 3), joinResult.records.subList(0, 3));
+                assertUnorderedListEquals(expectedRecords.subList(3, 5), joinResult.records.subList(3, 5));
+                assertRecordsEquals(expectedRecords.subList(5, 7), joinResult.records.subList(5, 7));
+
+                assertTrue(joinResult.joinFuture.isDone());
+                assertEquals(
+                    new JoinGroupResponseData()
+                        .setMemberId(newMemberId)
+                        .setGenerationId(11)
+                        .setProtocolType(ConsumerProtocol.PROTOCOL_TYPE)
+                        .setProtocolName("range"),
+                    joinResult.joinFuture.get()
+                );
+
+                context.assertSessionTimeout(groupId, newMemberId, request.sessionTimeoutMs());
+                context.assertSyncTimeout(groupId, newMemberId, request.rebalanceTimeoutMs());
+            } else {
+                joinResult.appendFuture.completeExceptionally(new NotLeaderOrFollowerException());
+                assertEquals(
+                    new JoinGroupResponseData()
+                        .setErrorCode(Errors.NOT_COORDINATOR.code()),
+                    joinResult.joinFuture.get()
+                );
+            }
+        }
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {true, false})
+    public void testJoiningConsumerGroupReplacingExistingStaticMember(boolean replaySuccessfully) throws Exception {
+        String groupId = "group-id";
+        Uuid fooTopicId = Uuid.randomUuid();
+        String fooTopicName = "foo";
+
+        for (short version = ConsumerProtocolSubscription.LOWEST_SUPPORTED_VERSION; version <= ConsumerProtocolSubscription.HIGHEST_SUPPORTED_VERSION; version++) {
+            String memberId = Uuid.randomUuid().toString();
+            String instanceId = "instance-id-" + version;
+            MockPartitionAssignor assignor = new MockPartitionAssignor("range");
+            assignor.prepareGroupAssignment(new GroupAssignment(Collections.emptyMap()));
+            GroupMetadataManagerTestContext context = new GroupMetadataManagerTestContext.Builder()
+                .withAssignors(Collections.singletonList(assignor))
+                .withMetadataImage(new MetadataImageBuilder()
+                    .addTopic(fooTopicId, fooTopicName, 2)
+                    .addRacks()
+                    .build())
+                .withConsumerGroup(new ConsumerGroupBuilder(groupId, 10)
+                    .withSubscriptionMetadata(new HashMap<String, TopicMetadata>() {
+                        {
+                            put(fooTopicName, new TopicMetadata(fooTopicId, fooTopicName, 2, mkMapOfPartitionRacks(2)));
+                        }
+                    })
+                    .withMember(new ConsumerGroupMember.Builder(memberId)
+                        .setInstanceId(instanceId)
+                        .setState(MemberState.STABLE)
+                        .setMemberEpoch(10)
+                        .setPreviousMemberEpoch(10)
+                        .setSubscribedTopicNames(Collections.singletonList(fooTopicName))
+                        .setAssignedPartitions(mkAssignment(
+                            mkTopicAssignment(fooTopicId, 0, 1)))
+                        .build())
+                    .withAssignment(memberId, mkAssignment(
+                        mkTopicAssignment(fooTopicId, 0, 1)))
+                    .withAssignmentEpoch(10))
+                .build();
+            context.groupMetadataManager.consumerGroup(groupId).setMetadataRefreshDeadline(Long.MAX_VALUE, 10);
+
+            JoinGroupRequestData request = new GroupMetadataManagerTestContext.JoinGroupRequestBuilder()
+                .withGroupId(groupId)
+                .withMemberId(UNKNOWN_MEMBER_ID)
+                .withGroupInstanceId(instanceId)
+                .withProtocols(GroupMetadataManagerTestContext.toConsumerProtocol(
+                    Collections.singletonList(fooTopicName),
+                    Collections.emptyList(),
+                    version))
+                .build();
+
+            // The static member joins with UNKNOWN_MEMBER_ID.
+            GroupMetadataManagerTestContext.JoinResult joinResult = context.sendClassicGroupJoin(
+                request,
+                true
+            );
+
+            if (replaySuccessfully) {
+                joinResult.appendFuture.complete(null);
+
+                String newMemberId = joinResult.joinFuture.get().memberId();
+                ConsumerGroupMember expectedMember = new ConsumerGroupMember.Builder(newMemberId)
+                    .setMemberEpoch(0)
+                    .setPreviousMemberEpoch(0)
+                    .setInstanceId(instanceId)
+                    .setState(MemberState.UNREVOKED_PARTITIONS)
+                    .setClientId("client")
+                    .setClientHost("localhost/127.0.0.1")
+                    .setSubscribedTopicNames(Collections.singletonList(fooTopicName))
+                    .setRebalanceTimeoutMs(500)
+                    .setSupportedClassicProtocols(request.protocols())
+                    .setPartitionsPendingRevocation(mkAssignment(
+                        mkTopicAssignment(fooTopicId, 0, 1)))
+                    .build();
+
+                List<Record> expectedRecords = Arrays.asList(
+                    // Remove the old static member.
+                    RecordHelpers.newCurrentAssignmentTombstoneRecord(groupId, memberId),
+                    RecordHelpers.newTargetAssignmentTombstoneRecord(groupId, memberId),
+                    RecordHelpers.newMemberSubscriptionTombstoneRecord(groupId, memberId),
+
+                    // Create the new static member.
+                    RecordHelpers.newMemberSubscriptionRecord(groupId, expectedMember),
+                    RecordHelpers.newTargetAssignmentRecord(groupId, newMemberId, Collections.emptyMap()),
+                    RecordHelpers.newTargetAssignmentEpochRecord(groupId, 10),
+                    RecordHelpers.newCurrentAssignmentRecord(groupId, expectedMember)
+                );
+                assertRecordsEquals(expectedRecords, joinResult.records);
+                assertEquals(
+                    new JoinGroupResponseData()
+                        .setMemberId(newMemberId)
+                        .setGenerationId(0)
+                        .setProtocolType(ConsumerProtocol.PROTOCOL_TYPE)
+                        .setProtocolName("range"),
+                    joinResult.joinFuture.get()
+                );
+
+                context.assertSessionTimeout(groupId, newMemberId, request.sessionTimeoutMs());
+                context.assertSyncTimeout(groupId, newMemberId, request.rebalanceTimeoutMs());
+            } else {
+                joinResult.appendFuture.completeExceptionally(new NotLeaderOrFollowerException());
+                assertEquals(
+                    new JoinGroupResponseData()
+                        .setErrorCode(Errors.NOT_COORDINATOR.code()),
+                    joinResult.joinFuture.get()
+                );
+            }
+        }
+    }
+
+    @ParameterizedTest
+    @CsvSource(value = {", true", ", false", "instance-id, true", "instance-id, false"})
+    public void testExistingMemberRejoiningConsumerGroup(String instanceId, boolean replaySuccessfully) throws Exception {
+        String groupId = "group-id";
+        Uuid fooTopicId = Uuid.randomUuid();
+        String fooTopicName = "foo";
+        Uuid barTopicId = Uuid.randomUuid();
+        String barTopicName = "bar";
+
+        for (short version = ConsumerProtocolSubscription.LOWEST_SUPPORTED_VERSION; version <= ConsumerProtocolSubscription.HIGHEST_SUPPORTED_VERSION; version++) {
+            String memberId1 = Uuid.randomUuid().toString();
+            String memberId2 = Uuid.randomUuid().toString();
+            MockPartitionAssignor assignor = new MockPartitionAssignor("range");
+            JoinGroupRequestData.JoinGroupRequestProtocolCollection protocols =
+                GroupMetadataManagerTestContext.toConsumerProtocol(
+                    Arrays.asList(fooTopicName, barTopicName),
+                    Arrays.asList(new TopicPartition(fooTopicName, 0), new TopicPartition(fooTopicName, 1)),
+                    version
+                );
+            GroupMetadataManagerTestContext context = new GroupMetadataManagerTestContext.Builder()
+                .withAssignors(Collections.singletonList(assignor))
+                .withMetadataImage(new MetadataImageBuilder()
+                    .addTopic(fooTopicId, fooTopicName, 2)
+                    .addTopic(barTopicId, barTopicName, 1)
+                    .addRacks()
+                    .build())
+                .withConsumerGroup(new ConsumerGroupBuilder(groupId, 10)
+                    .withSubscriptionMetadata(new HashMap<String, TopicMetadata>() {
+                        {
+                            put(fooTopicName, new TopicMetadata(fooTopicId, fooTopicName, 2, mkMapOfPartitionRacks(2)));
+                            put(barTopicName, new TopicMetadata(barTopicId, barTopicName, 1, mkMapOfPartitionRacks(1)));
+                        }
+                    })
+                    .withMember(new ConsumerGroupMember.Builder(memberId1)
+                        .setInstanceId(instanceId)
+                        .setState(MemberState.STABLE)
+                        .setMemberEpoch(10)
+                        .setPreviousMemberEpoch(10)
+                        .setRebalanceTimeoutMs(500)
+                        .setClientId("client")
+                        .setClientHost("localhost/127.0.0.1")
+                        .setSupportedClassicProtocols(protocols)
+                        .setSubscribedTopicNames(Arrays.asList(fooTopicName, barTopicName))
+                        .build())
+                    .withMember(new ConsumerGroupMember.Builder(memberId2)
+                        .setState(MemberState.STABLE)
+                        .setMemberEpoch(10)
+                        .setPreviousMemberEpoch(10)
+                        .setRebalanceTimeoutMs(500)
+                        .setClientId("client")
+                        .setClientHost("localhost/127.0.0.1")
+                        .setSubscribedTopicNames(Arrays.asList(fooTopicName, barTopicName))
+                        .build())
+                    .withAssignment(memberId1, mkAssignment(
+                        mkTopicAssignment(fooTopicId, 0, 1)))
+                    .withAssignment(memberId2, mkAssignment(
+                        mkTopicAssignment(barTopicId, 0)))
+                    .withAssignmentEpoch(10))
+                .build();
+            context.groupMetadataManager.consumerGroup(groupId).setMetadataRefreshDeadline(Long.MAX_VALUE, 10);
+
+            JoinGroupRequestData request = new GroupMetadataManagerTestContext.JoinGroupRequestBuilder()
+                .withGroupId(groupId)
+                .withMemberId(memberId1)
+                .withGroupInstanceId(instanceId)
+                .withProtocols(protocols)
+                .build();
+
+            // The member rejoins with the same member id and protocols.
+            GroupMetadataManagerTestContext.JoinResult joinResult = context.sendClassicGroupJoin(request);
+            assertEquals(Collections.emptyList(), joinResult.records);
+
+            if (replaySuccessfully) {
+                joinResult.appendFuture.complete(null);
+                assertEquals(
+                    new JoinGroupResponseData()
+                        .setMemberId(memberId1)
+                        .setGenerationId(10)
+                        .setProtocolType(ConsumerProtocol.PROTOCOL_TYPE)
+                        .setProtocolName("range"),
+                    joinResult.joinFuture.get()
+                );
+                context.assertSyncTimeout(groupId, memberId1, request.rebalanceTimeoutMs());
+                context.assertSyncTimeout(groupId, memberId1, request.rebalanceTimeoutMs());
+            } else {
+                joinResult.appendFuture.completeExceptionally(new NotLeaderOrFollowerException());
+                assertEquals(
+                    new JoinGroupResponseData()
+                        .setErrorCode(Errors.NOT_COORDINATOR.code()),
+                    joinResult.joinFuture.get()
+                );
+                context.assertNoSessionTimeout(groupId, memberId1);
+                context.assertNoSyncTimeout(groupId, memberId1);
+            }
+        }
+    }
+
+    @Test
+    public void testStaticMemberJoiningConsumerGroupWithUnknownInstanceId() throws Exception {
+        String groupId = "group-id";
+        String instanceId = "instance-id";
+        String memberId1 = Uuid.randomUuid().toString();
+        String memberId2 = Uuid.randomUuid().toString();
+        String fooTopicName = "foo";
+        String barTopicName = "bar";
+
+        JoinGroupRequestData.JoinGroupRequestProtocolCollection protocols =
+            GroupMetadataManagerTestContext.toConsumerProtocol(
+                Arrays.asList(fooTopicName, barTopicName),
+                Arrays.asList(new TopicPartition(fooTopicName, 0), new TopicPartition(fooTopicName, 1))
+            );
+        // Set up a ConsumerGroup with no static member.
+        GroupMetadataManagerTestContext context = new GroupMetadataManagerTestContext.Builder()
+            .withConsumerGroup(new ConsumerGroupBuilder(groupId, 10)
+                .withMember(new ConsumerGroupMember.Builder(memberId1)
+                    .setSupportedClassicProtocols(protocols)
+                    .build())
+                .withMember(new ConsumerGroupMember.Builder(memberId2)
+                    .build()))
+            .build();
+
+        // The member joins with an instance id.
+        JoinGroupRequestData request = new GroupMetadataManagerTestContext.JoinGroupRequestBuilder()
+            .withGroupId(groupId)
+            .withMemberId(memberId1)
+            .withGroupInstanceId(instanceId)
+            .withProtocols(protocols)
+            .build();
+
+        assertThrows(UnknownMemberIdException.class, () -> context.sendClassicGroupJoin(request));
+    }
+
+    @Test
+    public void testStaticMemberJoiningConsumerGroupWithUnmatchedMemberId() throws Exception {
+        String groupId = "group-id";
+        String instanceId = "instance-id";
+        String memberId1 = Uuid.randomUuid().toString();
+        String memberId2 = Uuid.randomUuid().toString();
+        String fooTopicName = "foo";
+        String barTopicName = "bar";
+
+        JoinGroupRequestData.JoinGroupRequestProtocolCollection protocols =
+            GroupMetadataManagerTestContext.toConsumerProtocol(
+                Arrays.asList(fooTopicName, barTopicName),
+                Arrays.asList(new TopicPartition(fooTopicName, 0), new TopicPartition(fooTopicName, 1))
+            );
+        GroupMetadataManagerTestContext context = new GroupMetadataManagerTestContext.Builder()
+            .withConsumerGroup(new ConsumerGroupBuilder(groupId, 10)
+                .withMember(new ConsumerGroupMember.Builder(memberId1)
+                    .setInstanceId(instanceId)
+                    .setSupportedClassicProtocols(protocols)
+                    .build())
+                .withMember(new ConsumerGroupMember.Builder(memberId2)
+                    .build()))
+            .build();
+
+        // The member joins with the same instance id and a different member id.
+        JoinGroupRequestData request = new GroupMetadataManagerTestContext.JoinGroupRequestBuilder()
+            .withGroupId(groupId)
+            .withMemberId(Uuid.randomUuid().toString())
+            .withGroupInstanceId(instanceId)
+            .withProtocols(protocols)
+            .build();
+
+        assertThrows(FencedInstanceIdException.class, () -> context.sendClassicGroupJoin(request));
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {true, false})
+    public void testMemberJoiningConsumerGroupWithNewSubscriptionTransitionsToUnrevokedPartitions(
+        boolean replaySuccessfully
+    ) throws Exception {
+        String groupId = "group-id";
+        Uuid fooTopicId = Uuid.randomUuid();
+        String fooTopicName = "foo";
+        Uuid barTopicId = Uuid.randomUuid();
+        String barTopicName = "bar";
+        Uuid zarTopicId = Uuid.randomUuid();
+        String zarTopicName = "zar";
+
+        // OwnedPartition in Subscription is supported from version 1.
+        for (short version = 1; version <= ConsumerProtocolSubscription.HIGHEST_SUPPORTED_VERSION; version++) {
+            String memberId1 = Uuid.randomUuid().toString();
+            String memberId2 = Uuid.randomUuid().toString();
+
+            MockPartitionAssignor assignor = new MockPartitionAssignor("range");
+            GroupMetadataManagerTestContext context = new GroupMetadataManagerTestContext.Builder()
+                .withAssignors(Collections.singletonList(assignor))
+                .withMetadataImage(new MetadataImageBuilder()
+                    .addTopic(fooTopicId, fooTopicName, 2)
+                    .addTopic(barTopicId, barTopicName, 1)
+                    .addTopic(zarTopicId, zarTopicName, 1)
+                    .addRacks()
+                    .build())
+                .withConsumerGroup(new ConsumerGroupBuilder(groupId, 10)
+                    .withSubscriptionMetadata(new HashMap<String, TopicMetadata>() {
+                        {
+                            put(fooTopicName, new TopicMetadata(fooTopicId, fooTopicName, 2, mkMapOfPartitionRacks(2)));
+                            put(barTopicName, new TopicMetadata(barTopicId, barTopicName, 1, mkMapOfPartitionRacks(1)));
+                        }
+                    })
+                    .withMember(new ConsumerGroupMember.Builder(memberId1)
+                        .setState(MemberState.UNREVOKED_PARTITIONS)
+                        .setMemberEpoch(10)
+                        .setPreviousMemberEpoch(10)
+                        .setRebalanceTimeoutMs(500)
+                        .setClientId("client")
+                        .setClientHost("localhost/127.0.0.1")
+                        .setSubscribedTopicNames(Arrays.asList(fooTopicName, barTopicName))
+                        .setSupportedClassicProtocols(GroupMetadataManagerTestContext.toConsumerProtocol(
+                            Arrays.asList(fooTopicName, barTopicName),
+                            Arrays.asList(new TopicPartition(fooTopicName, 0), new TopicPartition(fooTopicName, 1)),
+                            version))
+                        .setPartitionsPendingRevocation(mkAssignment(
+                            mkTopicAssignment(fooTopicId, 1)))
+                        .build())
+                    .withMember(new ConsumerGroupMember.Builder(memberId2)
+                        .setState(MemberState.STABLE)
+                        .setMemberEpoch(10)
+                        .setPreviousMemberEpoch(10)
+                        .setRebalanceTimeoutMs(500)
+                        .setClientId("client")
+                        .setClientHost("localhost/127.0.0.1")
+                        .setSubscribedTopicNames(Arrays.asList(fooTopicName, barTopicName))
+                        .build())
+                    .withAssignment(memberId1, mkAssignment(
+                        mkTopicAssignment(fooTopicId, 0),
+                        mkTopicAssignment(barTopicId, 0)))
+                    .withAssignment(memberId2, mkAssignment(
+                        mkTopicAssignment(fooTopicId, 1)))
+                    .withAssignmentEpoch(10))
+                .build();
+            ConsumerGroup group = context.groupMetadataManager.consumerGroup(groupId);
+            group.setMetadataRefreshDeadline(Long.MAX_VALUE, 11);
+
+            assignor.prepareGroupAssignment(new GroupAssignment(
+                new HashMap<String, MemberAssignment>() {
+                    {
+                        put(memberId1, new MemberAssignment(mkAssignment(
+                            mkTopicAssignment(fooTopicId, 0),
+                            mkTopicAssignment(zarTopicId, 0)
+                        )));
+                        put(memberId2, new MemberAssignment(mkAssignment(
+                            mkTopicAssignment(barTopicId, 0),
+                            mkTopicAssignment(fooTopicId, 1)
+                        )));
+                    }
+                }
+            ));
+
+            // The member joins with a new subscription list.
+            JoinGroupRequestData request = new GroupMetadataManagerTestContext.JoinGroupRequestBuilder()
+                .withGroupId(groupId)
+                .withMemberId(memberId1)
+                .withProtocols(GroupMetadataManagerTestContext.toConsumerProtocol(
+                    Arrays.asList(fooTopicName, barTopicName, zarTopicName),
+                    Arrays.asList(new TopicPartition(fooTopicName, 0), new TopicPartition(fooTopicName, 1)),
+                    version))
+                .build();
+            GroupMetadataManagerTestContext.JoinResult joinResult = context.sendClassicGroupJoin(request);
+
+            ConsumerGroupMember expectedMember = new ConsumerGroupMember.Builder(memberId1)
+                .setMemberEpoch(10)
+                .setPreviousMemberEpoch(10)
+                .setRebalanceTimeoutMs(500)
+                .setClientId("client")
+                .setClientHost("localhost/127.0.0.1")
+                .setState(MemberState.UNREVOKED_PARTITIONS)
+                .setSubscribedTopicNames(Arrays.asList(fooTopicName, barTopicName, zarTopicName))
+                .setPartitionsPendingRevocation(mkAssignment(
+                    mkTopicAssignment(fooTopicId, 1)))
+                .setSupportedClassicProtocols(GroupMetadataManagerTestContext.toConsumerProtocol(
+                    Arrays.asList(fooTopicName, barTopicName, zarTopicName),
+                    Arrays.asList(new TopicPartition(fooTopicName, 0), new TopicPartition(fooTopicName, 1)),
+                    version))
+                .build();
+
+            List<Record> expectedRecords = Arrays.asList(
+                RecordHelpers.newMemberSubscriptionRecord(groupId, expectedMember),
+                RecordHelpers.newGroupSubscriptionMetadataRecord(groupId, new HashMap<String, TopicMetadata>() {
+                    {
+                        put(fooTopicName, new TopicMetadata(fooTopicId, fooTopicName, 2, mkMapOfPartitionRacks(2)));
+                        put(barTopicName, new TopicMetadata(barTopicId, barTopicName, 1, mkMapOfPartitionRacks(1)));
+                        put(zarTopicName, new TopicMetadata(zarTopicId, zarTopicName, 1, mkMapOfPartitionRacks(1)));
+                    }
+                }),
+                RecordHelpers.newGroupEpochRecord(groupId, 11),
+                RecordHelpers.newTargetAssignmentRecord(groupId, memberId1, mkAssignment(
+                    mkTopicAssignment(fooTopicId, 0),
+                    mkTopicAssignment(zarTopicId, 0))),
+                RecordHelpers.newTargetAssignmentRecord(groupId, memberId2, mkAssignment(
+                    mkTopicAssignment(barTopicId, 0),
+                    mkTopicAssignment(fooTopicId, 1))),
+                RecordHelpers.newTargetAssignmentEpochRecord(groupId, 11)
+            );
+            assertRecordsEquals(expectedRecords.subList(0, 3), joinResult.records.subList(0, 3));
+            assertUnorderedListEquals(expectedRecords.subList(3, 5), joinResult.records.subList(3, 5));
+            assertRecordsEquals(expectedRecords.subList(5, 6), joinResult.records.subList(5, 6));
+
+            assertEquals(expectedMember.state(), group.getOrMaybeCreateMember(memberId1, false).state());
+
+            if (replaySuccessfully) {
+                joinResult.appendFuture.complete(null);
+                assertEquals(
+                    new JoinGroupResponseData()
+                        .setMemberId(memberId1)
+                        .setGenerationId(10)
+                        .setProtocolType(ConsumerProtocol.PROTOCOL_TYPE)
+                        .setProtocolName("range"),
+                    joinResult.joinFuture.get()
+                );
+                context.assertSessionTimeout(groupId, memberId1, request.sessionTimeoutMs());
+                context.assertSyncTimeout(groupId, memberId1, request.rebalanceTimeoutMs());
+            } else {
+                joinResult.appendFuture.completeExceptionally(new NotLeaderOrFollowerException());
+                assertEquals(
+                    new JoinGroupResponseData()
+                        .setErrorCode(Errors.NOT_COORDINATOR.code()),
+                    joinResult.joinFuture.get()
+                );
+                context.assertNoSessionTimeout(groupId, memberId1);
+                context.assertNoSyncTimeout(groupId, memberId1);
+            }
+        }
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {true, false})
+    public void testStableMemberJoiningConsumerGroupWithNewSubscriptionTransitionsToUnreleasedPartitions(
+        boolean replaySuccessfully
+    ) throws Exception {
+        String groupId = "group-id";
+        Uuid fooTopicId = Uuid.randomUuid();
+        String fooTopicName = "foo";
+        Uuid barTopicId = Uuid.randomUuid();
+        String barTopicName = "bar";
+        Uuid zarTopicId = Uuid.randomUuid();
+        String zarTopicName = "zar";
+
+        for (short version = ConsumerProtocolSubscription.LOWEST_SUPPORTED_VERSION; version <= ConsumerProtocolSubscription.HIGHEST_SUPPORTED_VERSION; version++) {
+            String memberId1 = Uuid.randomUuid().toString();
+            String memberId2 = Uuid.randomUuid().toString();
+
+            MockPartitionAssignor assignor = new MockPartitionAssignor("range");
+            GroupMetadataManagerTestContext context = new GroupMetadataManagerTestContext.Builder()
+                .withAssignors(Collections.singletonList(assignor))
+                .withMetadataImage(new MetadataImageBuilder()
+                    .addTopic(fooTopicId, fooTopicName, 2)
+                    .addTopic(barTopicId, barTopicName, 1)
+                    .addTopic(zarTopicId, zarTopicName, 1)
+                    .addRacks()
+                    .build())
+                .withConsumerGroup(new ConsumerGroupBuilder(groupId, 10)
+                    .withSubscriptionMetadata(new HashMap<String, TopicMetadata>() {
+                        {
+                            put(fooTopicName, new TopicMetadata(fooTopicId, fooTopicName, 2, mkMapOfPartitionRacks(2)));
+                            put(barTopicName, new TopicMetadata(barTopicId, barTopicName, 1, mkMapOfPartitionRacks(1)));
+                        }
+                    })
+                    .withMember(new ConsumerGroupMember.Builder(memberId1)
+                        .setState(MemberState.STABLE)
+                        .setMemberEpoch(10)
+                        .setPreviousMemberEpoch(10)
+                        .setRebalanceTimeoutMs(500)
+                        .setClientId("client")
+                        .setClientHost("localhost/127.0.0.1")
+                        .setSubscribedTopicNames(Arrays.asList(fooTopicName, barTopicName))
+                        .setSupportedClassicProtocols(GroupMetadataManagerTestContext.toConsumerProtocol(
+                            Arrays.asList(fooTopicName, barTopicName),
+                            Arrays.asList(new TopicPartition(fooTopicName, 0), new TopicPartition(fooTopicName, 1)),
+                            version))
+                        .build())
+                    .withMember(new ConsumerGroupMember.Builder(memberId2)
+                        .setState(MemberState.STABLE)
+                        .setMemberEpoch(10)
+                        .setPreviousMemberEpoch(10)
+                        .setRebalanceTimeoutMs(500)
+                        .setClientId("client")
+                        .setClientHost("localhost/127.0.0.1")
+                        .setSubscribedTopicNames(Arrays.asList(fooTopicName, barTopicName))
+                        .build())
+                    .withAssignment(memberId1, mkAssignment(
+                        mkTopicAssignment(fooTopicId, 0),
+                        mkTopicAssignment(barTopicId, 0)))
+                    .withAssignment(memberId2, mkAssignment(
+                        mkTopicAssignment(fooTopicId, 1)))
+                    .withAssignmentEpoch(10))
+                .build();
+            ConsumerGroup group = context.groupMetadataManager.consumerGroup(groupId);
+            group.setMetadataRefreshDeadline(Long.MAX_VALUE, 11);
+
+            assignor.prepareGroupAssignment(new GroupAssignment(
+                new HashMap<String, MemberAssignment>() {
+                    {
+                        put(memberId1, new MemberAssignment(mkAssignment(
+                            mkTopicAssignment(fooTopicId, 0),
+                            mkTopicAssignment(zarTopicId, 0)
+                        )));
+                        put(memberId2, new MemberAssignment(mkAssignment(
+                            mkTopicAssignment(barTopicId, 0),
+                            mkTopicAssignment(fooTopicId, 1)
+                        )));
+                    }
+                }
+            ));
+
+            // The member joins with a new subscription list. All its partitions have been rovoked.
+            JoinGroupRequestData request = new GroupMetadataManagerTestContext.JoinGroupRequestBuilder()
+                .withGroupId(groupId)
+                .withMemberId(memberId1)
+                .withProtocols(GroupMetadataManagerTestContext.toConsumerProtocol(
+                    Arrays.asList(fooTopicName, barTopicName, zarTopicName),
+                    Collections.emptyList(),
+                    version))
+                .build();
+            GroupMetadataManagerTestContext.JoinResult joinResult = context.sendClassicGroupJoin(request);
+
+            ConsumerGroupMember expectedMember = new ConsumerGroupMember.Builder(memberId1)
+                .setMemberEpoch(11)
+                .setPreviousMemberEpoch(10)
+                .setRebalanceTimeoutMs(500)
+                .setClientId("client")
+                .setClientHost("localhost/127.0.0.1")
+                .setState(MemberState.UNRELEASED_PARTITIONS)
+                .setSubscribedTopicNames(Arrays.asList(fooTopicName, barTopicName, zarTopicName))
+                .setAssignedPartitions(mkAssignment(
+                    mkTopicAssignment(fooTopicId, 0),
+                    mkTopicAssignment(zarTopicId, 0)))
+                .setSupportedClassicProtocols(GroupMetadataManagerTestContext.toConsumerProtocol(
+                    Arrays.asList(fooTopicName, barTopicName, zarTopicName),
+                    Collections.emptyList(),
+                    version))
+                .build();
+
+            List<Record> expectedRecords = Arrays.asList(
+                RecordHelpers.newMemberSubscriptionRecord(groupId, expectedMember),
+                RecordHelpers.newGroupSubscriptionMetadataRecord(groupId, new HashMap<String, TopicMetadata>() {
+                    {
+                        put(fooTopicName, new TopicMetadata(fooTopicId, fooTopicName, 2, mkMapOfPartitionRacks(2)));
+                        put(barTopicName, new TopicMetadata(barTopicId, barTopicName, 1, mkMapOfPartitionRacks(1)));
+                        put(zarTopicName, new TopicMetadata(zarTopicId, zarTopicName, 1, mkMapOfPartitionRacks(1)));
+                    }
+                }),
+                RecordHelpers.newGroupEpochRecord(groupId, 11),
+                RecordHelpers.newTargetAssignmentRecord(groupId, memberId1, mkAssignment(
+                    mkTopicAssignment(fooTopicId, 0),
+                    mkTopicAssignment(zarTopicId, 0))),
+                RecordHelpers.newTargetAssignmentRecord(groupId, memberId2, mkAssignment(
+                    mkTopicAssignment(barTopicId, 0),
+                    mkTopicAssignment(fooTopicId, 1))),
+                RecordHelpers.newTargetAssignmentEpochRecord(groupId, 11),
+                RecordHelpers.newCurrentAssignmentRecord(groupId, expectedMember)
+            );
+            assertRecordsEquals(expectedRecords.subList(0, 3), joinResult.records.subList(0, 3));
+            assertUnorderedListEquals(expectedRecords.subList(3, 5), joinResult.records.subList(3, 5));
+            assertRecordsEquals(expectedRecords.subList(5, 7), joinResult.records.subList(5, 7));
+
+            if (replaySuccessfully) {
+                joinResult.appendFuture.complete(null);
+                assertEquals(
+                    new JoinGroupResponseData()
+                        .setMemberId(memberId1)
+                        .setGenerationId(11)
+                        .setProtocolType(ConsumerProtocol.PROTOCOL_TYPE)
+                        .setProtocolName("range"),
+                    joinResult.joinFuture.get()
+                );
+                context.assertSessionTimeout(groupId, memberId1, request.sessionTimeoutMs());
+                context.assertSyncTimeout(groupId, memberId1, request.rebalanceTimeoutMs());
+            } else {
+                joinResult.appendFuture.completeExceptionally(new NotLeaderOrFollowerException());
+                assertEquals(
+                    new JoinGroupResponseData()
+                        .setErrorCode(Errors.NOT_COORDINATOR.code()),
+                    joinResult.joinFuture.get()
+                );
+                context.assertNoSessionTimeout(groupId, memberId1);
+                context.assertNoSyncTimeout(groupId, memberId1);
+            }
+        }
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {true, false})
+    public void testMemberInUnrevokedPartitionsRejoiningConsumerGroupTransitionsToUnreleasedPartitions(
+        boolean replaySuccessfully
+    ) throws Exception {
+        String groupId = "group-id";
+        Uuid fooTopicId = Uuid.randomUuid();
+        String fooTopicName = "foo";
+        Uuid barTopicId = Uuid.randomUuid();
+        String barTopicName = "bar";
+
+        for (short version = ConsumerProtocolSubscription.LOWEST_SUPPORTED_VERSION; version <= ConsumerProtocolSubscription.HIGHEST_SUPPORTED_VERSION; version++) {
+            String memberId1 = Uuid.randomUuid().toString();
+            String memberId2 = Uuid.randomUuid().toString();
+            GroupMetadataManagerTestContext context = new GroupMetadataManagerTestContext.Builder()
+                .withAssignors(Collections.singletonList(new MockPartitionAssignor("range")))
+                .withMetadataImage(new MetadataImageBuilder()
+                    .addTopic(fooTopicId, fooTopicName, 2)
+                    .addTopic(barTopicId, barTopicName, 1)
+                    .addRacks()
+                    .build())
+                .withConsumerGroup(new ConsumerGroupBuilder(groupId, 11)
+                    .withSubscriptionMetadata(new HashMap<String, TopicMetadata>() {
+                        {
+                            put(fooTopicName, new TopicMetadata(fooTopicId, fooTopicName, 2, mkMapOfPartitionRacks(2)));
+                            put(barTopicName, new TopicMetadata(barTopicId, barTopicName, 1, mkMapOfPartitionRacks(1)));
+                        }
+                    })
+                    .withMember(new ConsumerGroupMember.Builder(memberId1)
+                        .setState(MemberState.UNREVOKED_PARTITIONS)
+                        .setMemberEpoch(10)
+                        .setPreviousMemberEpoch(10)
+                        .setRebalanceTimeoutMs(500)
+                        .setClientId("client")
+                        .setClientHost("localhost/127.0.0.1")
+                        .setSubscribedTopicNames(Arrays.asList(fooTopicName, barTopicName))
+                        .setSupportedClassicProtocols(GroupMetadataManagerTestContext.toConsumerProtocol(
+                            Arrays.asList(fooTopicName, barTopicName),
+                            Arrays.asList(new TopicPartition(fooTopicName, 0), new TopicPartition(fooTopicName, 1)),
+                            version))
+                        .setPartitionsPendingRevocation(mkAssignment(
+                            mkTopicAssignment(fooTopicId, 1)))
+                        .build())
+                    .withMember(new ConsumerGroupMember.Builder(memberId2)
+                        .setState(MemberState.UNREVOKED_PARTITIONS)
+                        .setMemberEpoch(10)
+                        .setPreviousMemberEpoch(10)
+                        .setRebalanceTimeoutMs(500)
+                        .setClientId("client")
+                        .setClientHost("localhost/127.0.0.1")
+                        .setSubscribedTopicNames(Arrays.asList(fooTopicName, barTopicName))
+                        .setPartitionsPendingRevocation(mkAssignment(
+                            mkTopicAssignment(barTopicId, 0)))
+                        .build())
+                    .withAssignment(memberId1, mkAssignment(
+                        mkTopicAssignment(fooTopicId, 0),
+                        mkTopicAssignment(barTopicId, 0)))
+                    .withAssignment(memberId2, mkAssignment(
+                        mkTopicAssignment(fooTopicId, 1)))
+                    .withAssignmentEpoch(11))
+                .build();
+            ConsumerGroup group = context.groupMetadataManager.consumerGroup(groupId);
+            group.setMetadataRefreshDeadline(Long.MAX_VALUE, 11);
+
+            JoinGroupRequestData request = new GroupMetadataManagerTestContext.JoinGroupRequestBuilder()
+                .withGroupId(groupId)
+                .withMemberId(memberId1)
+                .withProtocols(GroupMetadataManagerTestContext.toConsumerProtocol(
+                    Arrays.asList(fooTopicName, barTopicName),
+                    Collections.singletonList(new TopicPartition(fooTopicName, 0)),
+                    version))
+                .build();
+
+            // The member rejoins after revoking foo-1. All the pending revoking partitions
+            // have been revoked, but member 2 hasn't revoked bar-0. The member epoch
+            // is bumped to 11 and the member transitions to Unreleased_Partitions.
+            GroupMetadataManagerTestContext.JoinResult joinResult = context.sendClassicGroupJoin(request);
+
+            ConsumerGroupMember expectedMember = new ConsumerGroupMember.Builder(memberId1)
+                .setMemberEpoch(11)
+                .setPreviousMemberEpoch(10)
+                .setRebalanceTimeoutMs(500)
+                .setClientId("client")
+                .setClientHost("localhost/127.0.0.1")
+                .setState(MemberState.UNRELEASED_PARTITIONS)
+                .setSubscribedTopicNames(Arrays.asList(fooTopicName, barTopicName))
+                .setAssignedPartitions(mkAssignment(
+                    mkTopicAssignment(fooTopicId, 0)))
+                .setSupportedClassicProtocols(GroupMetadataManagerTestContext.toConsumerProtocol(
+                    Arrays.asList(fooTopicName, barTopicName),
+                    Arrays.asList(new TopicPartition(fooTopicName, 0)),
+                    version))
+                .build();
+
+            // OwnedPartitions is supported from version 1.
+            if (version >= 1) {
+                assertRecordsEquals(
+                    Arrays.asList(
+                        RecordHelpers.newMemberSubscriptionRecord(groupId, expectedMember),
+                        RecordHelpers.newCurrentAssignmentRecord(groupId, expectedMember)
+                    ),
+                    joinResult.records
+                );
+            } else {
+                assertRecordsEquals(
+                    Arrays.asList(RecordHelpers.newCurrentAssignmentRecord(groupId, expectedMember)),
+                    joinResult.records
+                );
+            }
+
+            if (replaySuccessfully) {
+                joinResult.appendFuture.complete(null);
+                assertEquals(
+                    new JoinGroupResponseData()
+                        .setMemberId(memberId1)
+                        .setGenerationId(11)
+                        .setProtocolType(ConsumerProtocol.PROTOCOL_TYPE)
+                        .setProtocolName("range"),
+                    joinResult.joinFuture.get()
+                );
+                context.assertSessionTimeout(groupId, memberId1, request.sessionTimeoutMs());
+                context.assertSyncTimeout(groupId, memberId1, request.rebalanceTimeoutMs());
+            } else {
+                joinResult.appendFuture.completeExceptionally(new NotLeaderOrFollowerException());
+                assertEquals(
+                    new JoinGroupResponseData()
+                        .setErrorCode(Errors.NOT_COORDINATOR.code()),
+                    joinResult.joinFuture.get()
+                );
+                context.assertNoSessionTimeout(groupId, memberId1);
+                context.assertNoSyncTimeout(groupId, memberId1);
+            }
+        }
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {true, false})
+    public void testMemberInUnreleasedPartitionsRejoiningConsumerGroupTransitionsToStable(
+        boolean replaySuccessfully
+    ) throws Exception {
+        String groupId = "group-id";
+        Uuid fooTopicId = Uuid.randomUuid();
+        String fooTopicName = "foo";
+        Uuid barTopicId = Uuid.randomUuid();
+        String barTopicName = "bar";
+
+        for (short version = ConsumerProtocolSubscription.LOWEST_SUPPORTED_VERSION; version <= ConsumerProtocolSubscription.HIGHEST_SUPPORTED_VERSION; version++) {
+            String memberId1 = Uuid.randomUuid().toString();
+            String memberId2 = Uuid.randomUuid().toString();
+            GroupMetadataManagerTestContext context = new GroupMetadataManagerTestContext.Builder()
+                .withAssignors(Collections.singletonList(new MockPartitionAssignor("range")))
+                .withMetadataImage(new MetadataImageBuilder()
+                    .addTopic(fooTopicId, fooTopicName, 2)
+                    .addTopic(barTopicId, barTopicName, 1)
+                    .addRacks()
+                    .build())
+                .withConsumerGroup(new ConsumerGroupBuilder(groupId, 11)
+                    .withSubscriptionMetadata(new HashMap<String, TopicMetadata>() {
+                        {
+                            put(fooTopicName, new TopicMetadata(fooTopicId, fooTopicName, 2, mkMapOfPartitionRacks(2)));
+                            put(barTopicName, new TopicMetadata(barTopicId, barTopicName, 1, mkMapOfPartitionRacks(1)));
+                        }
+                    })
+                    .withMember(new ConsumerGroupMember.Builder(memberId1)
+                        .setState(MemberState.UNRELEASED_PARTITIONS)
+                        .setMemberEpoch(10)
+                        .setPreviousMemberEpoch(10)
+                        .setRebalanceTimeoutMs(500)
+                        .setClientId("client")
+                        .setClientHost("localhost/127.0.0.1")
+                        .setSubscribedTopicNames(Arrays.asList(fooTopicName, barTopicName))
+                        .setSupportedClassicProtocols(GroupMetadataManagerTestContext.toConsumerProtocol(
+                            Arrays.asList(fooTopicName, barTopicName),
+                            Collections.singletonList(new TopicPartition(fooTopicName, 0)),
+                            version))
+                        .build())
+                    .withMember(new ConsumerGroupMember.Builder(memberId2)
+                        .setState(MemberState.STABLE)
+                        .setMemberEpoch(10)
+                        .setPreviousMemberEpoch(10)
+                        .setRebalanceTimeoutMs(500)
+                        .setClientId("client")
+                        .setClientHost("localhost/127.0.0.1")
+                        .setSubscribedTopicNames(Arrays.asList(fooTopicName, barTopicName))
+                        .build())
+                    .withAssignment(memberId1, mkAssignment(
+                        mkTopicAssignment(fooTopicId, 0),
+                        mkTopicAssignment(barTopicId, 0)))
+                    .withAssignment(memberId2, mkAssignment(
+                        mkTopicAssignment(fooTopicId, 1)))
+                    .withAssignmentEpoch(11))
+                .build();
+            ConsumerGroup group = context.groupMetadataManager.consumerGroup(groupId);
+            group.setMetadataRefreshDeadline(Long.MAX_VALUE, 11);
+
+            JoinGroupRequestData request = new GroupMetadataManagerTestContext.JoinGroupRequestBuilder()
+                .withGroupId(groupId)
+                .withMemberId(memberId1)
+                .withProtocols(GroupMetadataManagerTestContext.toConsumerProtocol(
+                    Arrays.asList(fooTopicName, barTopicName),
+                    Collections.singletonList(new TopicPartition(fooTopicName, 0)),
+                    version))
+                .build();
+
+            // The member rejoins after revoking foo-1. All the pending revoking partitions
+            // have been revoked, but member 2 hasn't revoked bar-0. The member epoch
+            // is bumped to 11 and the member transitions to Unreleased_Partitions.
+            GroupMetadataManagerTestContext.JoinResult joinResult = context.sendClassicGroupJoin(request);
+
+            ConsumerGroupMember expectedMember = new ConsumerGroupMember.Builder(memberId1)
+                .setMemberEpoch(11)
+                .setPreviousMemberEpoch(10)
+                .setRebalanceTimeoutMs(500)
+                .setClientId("client")
+                .setClientHost("localhost/127.0.0.1")
+                .setState(MemberState.STABLE)
+                .setSubscribedTopicNames(Arrays.asList(fooTopicName, barTopicName))
+                .setAssignedPartitions(mkAssignment(
+                    mkTopicAssignment(fooTopicId, 0),
+                    mkTopicAssignment(barTopicId, 0)))
+                .setSupportedClassicProtocols(GroupMetadataManagerTestContext.toConsumerProtocol(
+                    Arrays.asList(fooTopicName, barTopicName),
+                    Arrays.asList(new TopicPartition(fooTopicName, 0)),
+                    version))
+                .build();
+
+            assertRecordsEquals(
+                Arrays.asList(RecordHelpers.newCurrentAssignmentRecord(groupId, expectedMember)),
+                joinResult.records
+            );
+
+            if (replaySuccessfully) {
+                joinResult.appendFuture.complete(null);
+                assertEquals(
+                    new JoinGroupResponseData()
+                        .setMemberId(memberId1)
+                        .setGenerationId(11)
+                        .setProtocolType(ConsumerProtocol.PROTOCOL_TYPE)
+                        .setProtocolName("range"),
+                    joinResult.joinFuture.get()
+                );
+                context.assertSessionTimeout(groupId, memberId1, request.sessionTimeoutMs());
+                context.assertSyncTimeout(groupId, memberId1, request.rebalanceTimeoutMs());
+            } else {
+                joinResult.appendFuture.completeExceptionally(new NotLeaderOrFollowerException());
+                assertEquals(
+                    new JoinGroupResponseData()
+                        .setErrorCode(Errors.NOT_COORDINATOR.code()),
+                    joinResult.joinFuture.get()
+                );
+                context.assertNoSessionTimeout(groupId, memberId1);
+                context.assertNoSyncTimeout(groupId, memberId1);
+            }
+        }
     }
 
     private static void checkJoinGroupResponse(
