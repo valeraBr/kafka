@@ -53,6 +53,7 @@ import java.io.IOException;
 import java.io.PrintStream;
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
@@ -536,7 +537,7 @@ public class VerifiableConsumer implements Closeable, OffsetCommitCallback, Cons
                 .setDefault(ConsumerConfig.DEFAULT_GROUP_PROTOCOL)
                 .metavar("GROUP_PROTOCOL")
                 .dest("groupProtocol")
-                .help(String.format("Group protocol (must be one of %s)", Utils.join(GroupProtocol.values(), ", ")));
+                .help(String.format("Group protocol (must be one of %s)", String.join(", ", Arrays.toString(GroupProtocol.values()))));
 
         parser.addArgument("--group-remote-assignor")
                 .action(store())
