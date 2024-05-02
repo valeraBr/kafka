@@ -21,10 +21,7 @@ import org.apache.kafka.clients.admin.NewTopic;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.clients.producer.Producer;
 import org.apache.kafka.clients.producer.RecordMetadata;
-import org.apache.kafka.common.IsolationLevel;
 import org.apache.kafka.common.config.ConfigException;
-import org.apache.kafka.common.errors.ProducerFencedException;
-import org.apache.kafka.common.errors.TopicAuthorizationException;
 import org.apache.kafka.common.header.internals.RecordHeaders;
 import org.apache.kafka.common.record.TimestampType;
 import org.apache.kafka.common.utils.MockTime;
@@ -33,7 +30,6 @@ import org.apache.kafka.connect.data.Field;
 import org.apache.kafka.connect.data.Schema;
 import org.apache.kafka.connect.data.SchemaAndValue;
 import org.apache.kafka.connect.data.Struct;
-import org.apache.kafka.connect.errors.ConnectException;
 import org.apache.kafka.connect.runtime.RestartRequest;
 import org.apache.kafka.connect.runtime.TargetState;
 import org.apache.kafka.connect.runtime.WorkerConfig;
@@ -55,7 +51,6 @@ import org.powermock.core.classloader.annotations.PrepareForTest;
 import org.powermock.modules.junit4.PowerMockRunner;
 import org.powermock.reflect.Whitebox;
 
-import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -65,19 +60,12 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
-import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Supplier;
 
-import static org.apache.kafka.clients.consumer.ConsumerConfig.ISOLATION_LEVEL_CONFIG;
-import static org.apache.kafka.clients.producer.ProducerConfig.ENABLE_IDEMPOTENCE_CONFIG;
-import static org.apache.kafka.clients.producer.ProducerConfig.TRANSACTIONAL_ID_CONFIG;
-import static org.apache.kafka.connect.runtime.distributed.DistributedConfig.EXACTLY_ONCE_SOURCE_SUPPORT_CONFIG;
-import static org.apache.kafka.connect.runtime.distributed.DistributedConfig.GROUP_ID_CONFIG;
 import static org.apache.kafka.connect.storage.KafkaConfigBackingStore.INCLUDE_TASKS_FIELD_NAME;
 import static org.apache.kafka.connect.storage.KafkaConfigBackingStore.ONLY_FAILED_FIELD_NAME;
-import static org.apache.kafka.connect.storage.KafkaConfigBackingStore.READ_WRITE_TOTAL_TIMEOUT_MS;
 import static org.apache.kafka.connect.storage.KafkaConfigBackingStore.RESTART_KEY;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
@@ -226,181 +214,6 @@ public class KafkaConfigBackingStoreTest {
         createStore();
     }
 
-    @Test
-    public void testPutConnectorConfigProducerError() throws Exception {
-        expectConfigure();
-        expectStart(Collections.emptyList(), Collections.emptyMap());
-        expectPartitionCount(1);
-
-        expectConvert(KafkaConfigBackingStore.CONNECTOR_CONFIGURATION_V0, CONNECTOR_CONFIG_STRUCTS.get(0), CONFIGS_SERIALIZED.get(0));
-
-        storeLog.sendWithReceipt(EasyMock.anyObject(), EasyMock.anyObject());
-        EasyMock.expectLastCall().andReturn(producerFuture);
-
-        producerFuture.get(EasyMock.anyLong(), EasyMock.anyObject());
-        EasyMock.expectLastCall().andThrow(new ExecutionException(new TopicAuthorizationException(Collections.singleton("test"))));
-
-        expectStop();
-
-        PowerMock.replayAll();
-
-        configStorage.setupAndCreateKafkaBasedLog(TOPIC, config);
-        configStorage.start();
-
-        // Verify initial state
-        ClusterConfigState configState = configStorage.snapshot();
-        assertEquals(-1, configState.offset());
-        assertEquals(0, configState.connectors().size());
-
-        // verify that the producer exception from KafkaBasedLog::send is propagated
-        ConnectException e = assertThrows(ConnectException.class, () -> configStorage.putConnectorConfig(CONNECTOR_IDS.get(0),
-            SAMPLE_CONFIGS.get(0), null));
-        assertTrue(e.getMessage().contains("Error writing connector configuration to Kafka"));
-        configStorage.stop();
-
-        PowerMock.verifyAll();
-    }
-
-    @Test
-    public void testRemoveConnectorConfigSlowProducer() throws Exception {
-        expectConfigure();
-        expectStart(Collections.emptyList(), Collections.emptyMap());
-        expectPartitionCount(1);
-
-        @SuppressWarnings("unchecked")
-        Future<RecordMetadata> connectorConfigProducerFuture = PowerMock.createMock(Future.class);
-        // tombstone for the connector config
-        storeLog.sendWithReceipt(EasyMock.anyObject(), EasyMock.isNull());
-        EasyMock.expectLastCall().andReturn(connectorConfigProducerFuture);
-
-        @SuppressWarnings("unchecked")
-        Future<RecordMetadata> targetStateProducerFuture = PowerMock.createMock(Future.class);
-        // tombstone for the connector target state
-        storeLog.sendWithReceipt(EasyMock.anyObject(), EasyMock.isNull());
-        EasyMock.expectLastCall().andReturn(targetStateProducerFuture);
-
-        connectorConfigProducerFuture.get(EasyMock.eq(READ_WRITE_TOTAL_TIMEOUT_MS), EasyMock.anyObject());
-        EasyMock.expectLastCall().andAnswer(() -> {
-            time.sleep(READ_WRITE_TOTAL_TIMEOUT_MS - 1000);
-            return null;
-        });
-
-        // the future get timeout is expected to be reduced according to how long the previous Future::get took
-        targetStateProducerFuture.get(EasyMock.eq(1000L), EasyMock.anyObject());
-        EasyMock.expectLastCall().andAnswer(() -> {
-            time.sleep(1000);
-            return null;
-        });
-
-        @SuppressWarnings("unchecked")
-        Future<Void> future = PowerMock.createMock(Future.class);
-        EasyMock.expect(storeLog.readToEnd()).andAnswer(() -> future);
-
-        // the Future::get calls on the previous two producer futures exhausted the overall timeout; so expect the
-        // timeout on the log read future to be 0
-        EasyMock.expect(future.get(EasyMock.eq(0L), EasyMock.anyObject())).andReturn(null);
-
-        expectStop();
-
-        PowerMock.replayAll();
-
-        configStorage.setupAndCreateKafkaBasedLog(TOPIC, config);
-        configStorage.start();
-
-        configStorage.removeConnectorConfig("test-connector");
-        configStorage.stop();
-
-        PowerMock.verifyAll();
-    }
-
-    @Test
-    public void testWritePrivileges() throws Exception {
-        // With exactly.once.source.support = preparing (or also, "enabled"), we need to use a transactional producer
-        // to write some types of messages to the config topic
-        props.put(EXACTLY_ONCE_SOURCE_SUPPORT_CONFIG, "preparing");
-        createStore();
-
-        expectConfigure();
-        expectStart(Collections.emptyList(), Collections.emptyMap());
-
-        // Try and fail to write a task count record to the config topic without write privileges
-        expectConvert(KafkaConfigBackingStore.TASK_COUNT_RECORD_V0, CONNECTOR_TASK_COUNT_RECORD_STRUCTS.get(0), CONFIGS_SERIALIZED.get(0));
-        // Claim write privileges
-        expectFencableProducer();
-        // And write the task count record successfully
-        expectConvert(KafkaConfigBackingStore.TASK_COUNT_RECORD_V0, CONNECTOR_TASK_COUNT_RECORD_STRUCTS.get(0), CONFIGS_SERIALIZED.get(0));
-        fencableProducer.beginTransaction();
-        EasyMock.expectLastCall();
-        EasyMock.expect(fencableProducer.send(EasyMock.anyObject())).andReturn(null);
-        fencableProducer.commitTransaction();
-        EasyMock.expectLastCall();
-        expectRead(CONNECTOR_TASK_COUNT_RECORD_KEYS.get(0), CONFIGS_SERIALIZED.get(0), CONNECTOR_TASK_COUNT_RECORD_STRUCTS.get(0));
-
-        // Try to write a connector config
-        expectConvert(KafkaConfigBackingStore.CONNECTOR_CONFIGURATION_V0, CONNECTOR_CONFIG_STRUCTS.get(0), CONFIGS_SERIALIZED.get(1));
-        fencableProducer.beginTransaction();
-        EasyMock.expectLastCall();
-        EasyMock.expect(fencableProducer.send(EasyMock.anyObject())).andReturn(null);
-        // Get fenced out
-        fencableProducer.commitTransaction();
-        EasyMock.expectLastCall().andThrow(new ProducerFencedException("Better luck next time"));
-        fencableProducer.close(Duration.ZERO);
-        EasyMock.expectLastCall();
-        // And fail when trying to write again without reclaiming write privileges
-        expectConvert(KafkaConfigBackingStore.CONNECTOR_CONFIGURATION_V0, CONNECTOR_CONFIG_STRUCTS.get(0), CONFIGS_SERIALIZED.get(1));
-
-        // In the meantime, write a target state (which doesn't require write privileges)
-        expectConvert(KafkaConfigBackingStore.TARGET_STATE_V1, TARGET_STATE_PAUSED, CONFIGS_SERIALIZED.get(1));
-        storeLog.sendWithReceipt("target-state-" + CONNECTOR_IDS.get(1), CONFIGS_SERIALIZED.get(1));
-        EasyMock.expectLastCall().andReturn(producerFuture);
-        producerFuture.get(EasyMock.anyLong(), EasyMock.anyObject());
-        EasyMock.expectLastCall().andReturn(null);
-
-        // Reclaim write privileges
-        expectFencableProducer();
-        // And successfully write the config
-        expectConvert(KafkaConfigBackingStore.CONNECTOR_CONFIGURATION_V0, CONNECTOR_CONFIG_STRUCTS.get(0), CONFIGS_SERIALIZED.get(1));
-        fencableProducer.beginTransaction();
-        EasyMock.expectLastCall();
-        EasyMock.expect(fencableProducer.send(EasyMock.anyObject())).andReturn(null);
-        fencableProducer.commitTransaction();
-        EasyMock.expectLastCall();
-        expectConvertRead(CONNECTOR_CONFIG_KEYS.get(1), CONNECTOR_CONFIG_STRUCTS.get(0), CONFIGS_SERIALIZED.get(2));
-        configUpdateListener.onConnectorConfigUpdate(CONNECTOR_IDS.get(1));
-        EasyMock.expectLastCall();
-
-        expectPartitionCount(1);
-        expectStop();
-        fencableProducer.close(Duration.ZERO);
-        EasyMock.expectLastCall();
-
-        PowerMock.replayAll();
-
-        configStorage.setupAndCreateKafkaBasedLog(TOPIC, config);
-        configStorage.start();
-
-        // Should fail the first time since we haven't claimed write privileges
-        assertThrows(IllegalStateException.class, () -> configStorage.putTaskCountRecord(CONNECTOR_IDS.get(0), 6));
-        // Should succeed now
-        configStorage.claimWritePrivileges();
-        configStorage.putTaskCountRecord(CONNECTOR_IDS.get(0), 6);
-
-        // Should fail again when we get fenced out
-        assertThrows(PrivilegedWriteException.class, () -> configStorage.putConnectorConfig(CONNECTOR_IDS.get(1), SAMPLE_CONFIGS.get(0), null));
-        // Should fail if we retry without reclaiming write privileges
-        assertThrows(IllegalStateException.class, () -> configStorage.putConnectorConfig(CONNECTOR_IDS.get(1), SAMPLE_CONFIGS.get(0), null));
-
-        // Should succeed even without write privileges (target states can be written by anyone)
-        configStorage.putTargetState(CONNECTOR_IDS.get(1), TargetState.PAUSED);
-
-        // Should succeed if we re-claim write privileges
-        configStorage.claimWritePrivileges();
-        configStorage.putConnectorConfig(CONNECTOR_IDS.get(1), SAMPLE_CONFIGS.get(0), null);
-
-        configStorage.stop();
-
-        PowerMock.verifyAll();
-    }
 
     @Test
     public void testTaskCountRecordsAndGenerations() throws Exception {
@@ -1370,94 +1183,6 @@ public class KafkaConfigBackingStoreTest {
         PowerMock.verifyAll();
     }
 
-    @Test
-    public void testExceptionOnStartWhenConfigTopicHasMultiplePartitions() throws Exception {
-        expectConfigure();
-        expectStart(Collections.emptyList(), Collections.emptyMap());
-
-        expectPartitionCount(2);
-
-        PowerMock.replayAll();
-
-        configStorage.setupAndCreateKafkaBasedLog(TOPIC, config);
-        ConfigException e = assertThrows(ConfigException.class, () -> configStorage.start());
-        assertTrue(e.getMessage().contains("required to have a single partition"));
-
-        PowerMock.verifyAll();
-    }
-
-    @Test
-    public void testFencableProducerPropertiesInsertedByDefault() throws Exception {
-        props.put(EXACTLY_ONCE_SOURCE_SUPPORT_CONFIG, "preparing");
-        String groupId = "my-connect-cluster";
-        props.put(GROUP_ID_CONFIG, groupId);
-        props.remove(TRANSACTIONAL_ID_CONFIG);
-        props.remove(ENABLE_IDEMPOTENCE_CONFIG);
-        createStore();
-
-        PowerMock.replayAll();
-
-        Map<String, Object> fencableProducerProperties = configStorage.fencableProducerProps(config);
-        assertEquals("connect-cluster-" + groupId, fencableProducerProperties.get(TRANSACTIONAL_ID_CONFIG));
-        assertEquals("true", fencableProducerProperties.get(ENABLE_IDEMPOTENCE_CONFIG));
-
-        PowerMock.verifyAll();
-    }
-
-    @Test
-    public void testConsumerPropertiesInsertedByDefaultWithExactlyOnceSourceEnabled() throws Exception {
-        props.put(EXACTLY_ONCE_SOURCE_SUPPORT_CONFIG, "enabled");
-        props.remove(ISOLATION_LEVEL_CONFIG);
-        createStore();
-
-        expectConfigure();
-        PowerMock.replayAll();
-
-        configStorage.setupAndCreateKafkaBasedLog(TOPIC, config);
-
-        assertEquals(
-                IsolationLevel.READ_COMMITTED.toString(),
-                capturedConsumerProps.getValue().get(ISOLATION_LEVEL_CONFIG)
-        );
-
-        PowerMock.verifyAll();
-    }
-
-    @Test
-    public void testConsumerPropertiesOverrideUserSuppliedValuesWithExactlyOnceSourceEnabled() throws Exception {
-        props.put(EXACTLY_ONCE_SOURCE_SUPPORT_CONFIG, "enabled");
-        props.put(ISOLATION_LEVEL_CONFIG, IsolationLevel.READ_UNCOMMITTED.toString());
-        createStore();
-
-        expectConfigure();
-        PowerMock.replayAll();
-
-        configStorage.setupAndCreateKafkaBasedLog(TOPIC, config);
-
-        assertEquals(
-                IsolationLevel.READ_COMMITTED.toString(),
-                capturedConsumerProps.getValue().get(ISOLATION_LEVEL_CONFIG)
-        );
-
-        PowerMock.verifyAll();
-    }
-
-    @Test
-    public void testConsumerPropertiesNotInsertedByDefaultWithoutExactlyOnceSourceEnabled() throws Exception {
-        props.put(EXACTLY_ONCE_SOURCE_SUPPORT_CONFIG, "preparing");
-        props.remove(ISOLATION_LEVEL_CONFIG);
-        createStore();
-
-        expectConfigure();
-        PowerMock.replayAll();
-
-        configStorage.setupAndCreateKafkaBasedLog(TOPIC, config);
-
-        assertNull(capturedConsumerProps.getValue().get(ISOLATION_LEVEL_CONFIG));
-
-        PowerMock.verifyAll();
-    }
-
     private void expectConfigure() throws Exception {
         PowerMock.expectPrivate(configStorage, "createKafkaBasedLog",
                 EasyMock.capture(capturedTopic), EasyMock.capture(capturedProducerProps),
@@ -1465,13 +1190,6 @@ public class KafkaConfigBackingStoreTest {
                 EasyMock.capture(capturedNewTopic), EasyMock.capture(capturedAdminSupplier),
                 EasyMock.anyObject(WorkerConfig.class), EasyMock.anyObject(Time.class))
                 .andReturn(storeLog);
-    }
-
-    private void expectFencableProducer() throws Exception {
-        fencableProducer.initTransactions();
-        EasyMock.expectLastCall();
-        PowerMock.expectPrivate(configStorage, "createFencableProducer")
-                .andReturn(fencableProducer);
     }
 
     private void expectPartitionCount(int partitionCount) {
@@ -1516,11 +1234,6 @@ public class KafkaConfigBackingStoreTest {
         expectRead(serializedData, Collections.singletonMap(key, deserializedValue));
     }
 
-    private void expectConvert(Schema valueSchema, Struct valueStruct, byte[] serialized) {
-        EasyMock.expect(converter.fromConnectData(EasyMock.eq(TOPIC), EasyMock.eq(valueSchema), EasyMock.eq(valueStruct)))
-                .andReturn(serialized);
-    }
-
     // Expect a conversion & write to the underlying log, followed by a subsequent read when the data is consumed back
     // from the log. Validate the data that is captured when the conversion is performed matches the specified data
     // (by checking a single field's value)
@@ -1546,14 +1259,6 @@ public class KafkaConfigBackingStoreTest {
                 });
     }
 
-    private void expectConvertRead(final String configKey, final Struct struct, final byte[] serialized) {
-        EasyMock.expect(converter.toConnectData(EasyMock.eq(TOPIC), EasyMock.aryEq(serialized)))
-                .andAnswer(() -> new SchemaAndValue(null, serialized == null ? null : structToMap(struct)));
-        LinkedHashMap<String, byte[]> recordsToRead = new LinkedHashMap<>();
-        recordsToRead.put(configKey, serialized);
-        expectReadToEnd(recordsToRead);
-    }
-
     // This map needs to maintain ordering
     private void expectReadToEnd(final LinkedHashMap<String, byte[]> serializedConfigs) {
         EasyMock.expect(storeLog.readToEnd())
@@ -1567,16 +1272,6 @@ public class KafkaConfigBackingStoreTest {
                     future.resolveOnGet((Void) null);
                     return future;
                 });
-    }
-
-    private void expectConnectorRemoval(String configKey, String targetStateKey) throws Exception {
-        expectConvertWriteRead(configKey, KafkaConfigBackingStore.CONNECTOR_CONFIGURATION_V0, null, null, null);
-        expectConvertWriteRead(targetStateKey, KafkaConfigBackingStore.TARGET_STATE_V0, null, null, null);
-
-        LinkedHashMap<String, byte[]> recordsToRead = new LinkedHashMap<>();
-        recordsToRead.put(configKey, null);
-        recordsToRead.put(targetStateKey, null);
-        expectReadToEnd(recordsToRead);
     }
 
     private void expectConvertWriteAndRead(final String configKey, final Schema valueSchema, final byte[] serialized,
